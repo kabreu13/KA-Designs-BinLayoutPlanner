@@ -1,0 +1,559 @@
+/* @vitest-environment jsdom */
+import React from 'react';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
+import { LayoutProvider, useLayout } from '../src/context/LayoutContext';
+
+function Harness() {
+  const {
+    placements,
+    addPlacement,
+    movePlacement,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
+    setDrawerSize,
+    importState,
+    exportState,
+    removePlacement,
+    suggestLayout
+  } = useLayout();
+  const [lastStatus, setLastStatus] = React.useState<string>('none');
+  const [lastSuggest, setLastSuggest] = React.useState<{ status: string; moved: number } | null>(null);
+
+  return (
+    <div>
+      <div data-testid="count">{placements.length}</div>
+      <div data-testid="can-undo">{String(canUndo)}</div>
+      <div data-testid="can-redo">{String(canRedo)}</div>
+      <div data-testid="drawer">{`${exportState().drawerWidth}x${exportState().drawerLength}`}</div>
+      <div data-testid="last-status">{lastStatus}</div>
+      <div data-testid="last-suggest">{lastSuggest?.status ?? 'none'}</div>
+      <div data-testid="last-suggest-moved">{lastSuggest?.moved ?? 0}</div>
+      <div data-testid="usage">{JSON.stringify(exportState().usage ?? {})}</div>
+      <div data-testid="placements">{JSON.stringify(placements)}</div>
+      <button onClick={() => addPlacement('bin-2x2', 0, 0)}>add</button>
+      <button
+        onClick={() => {
+          const result = addPlacement('bin-2x2', 0, 0);
+          setLastStatus(result.status);
+        }}
+      >
+        add-2x2-00
+      </button>
+      <button
+        onClick={() => {
+          const result = addPlacement('bin-2x2', 2, 0);
+          setLastStatus(result.status);
+        }}
+      >
+        add-2x2-20
+      </button>
+      <button
+        onClick={() => {
+          const result = addPlacement('bin-2x2', 0, 0);
+          setLastStatus(result.status);
+        }}
+      >
+        add-2x2-00-dup
+      </button>
+      <button
+        onClick={() => {
+          const result = addPlacement('bin-2x2', 0, 0);
+          setLastStatus(result.status);
+        }}
+      >
+        add-2x2-for-autofit
+      </button>
+      <button
+        onClick={() => {
+          if (placements[0]) {
+            const result = movePlacement(placements[0].id, 1, 1);
+            setLastStatus(result.status);
+          }
+        }}
+      >
+        move
+      </button>
+      <button
+        onClick={() => {
+          if (placements[1]) {
+            const result = movePlacement(placements[1].id, 0, 0);
+            setLastStatus(result.status);
+          }
+        }}
+      >
+        move-second-to-00
+      </button>
+      <button
+        onClick={() => {
+          const result = addPlacement('missing-bin', 0, 0);
+          setLastStatus(result.status);
+        }}
+      >
+        add-missing
+      </button>
+      <button
+        onClick={() => {
+          const result = movePlacement('missing-placement', 0, 0);
+          setLastStatus(result.status);
+        }}
+      >
+        move-missing
+      </button>
+      <button
+        onClick={() => {
+          if (placements[0]) {
+            removePlacement(placements[0].id);
+          }
+        }}
+      >
+        remove
+      </button>
+      <button
+        onClick={() => {
+          const result = suggestLayout();
+          setLastSuggest(result);
+        }}
+      >
+        suggest-layout
+      </button>
+      <button onClick={undo}>undo</button>
+      <button onClick={redo}>redo</button>
+      <button onClick={() => setDrawerSize(30, 20)}>resize</button>
+      <button onClick={() => setDrawerSize(4, 4)}>resize-4x4</button>
+      <button onClick={() => setDrawerSize(2, 2)}>resize-2x2</button>
+      <button
+        onClick={() =>
+          importState({
+            drawerWidth: 24,
+            drawerLength: 18,
+            placements: [],
+            usage: {}
+          })
+        }
+      >
+        import-ok
+      </button>
+      <button
+        onClick={() =>
+          importState({
+            drawerWidth: 24,
+            drawerLength: 0,
+            placements: [],
+            usage: {}
+          })
+        }
+      >
+        import-bad
+      </button>
+      <button
+        onClick={() =>
+          importState({
+            drawerWidth: 0,
+            drawerLength: 0,
+            placements: 'nope' as unknown as [],
+            usage: {}
+          })
+        }
+      >
+        import-bad-shape
+      </button>
+      <button
+        onClick={() =>
+          importState({
+            drawerWidth: 24,
+            drawerLength: 18,
+            placements: [],
+            usage: undefined as unknown as Record<string, number>
+          })
+        }
+      >
+        import-no-usage
+      </button>
+      <button
+        onClick={() =>
+          importState({
+            drawerWidth: 2,
+            drawerLength: 2,
+            placements: [
+              { id: 'p1', binId: 'bin-2x2', x: 0, y: 0 },
+              { id: 'p2', binId: 'bin-2x2', x: 0, y: 0 }
+            ],
+            usage: { 'bin-2x2': 2 }
+          })
+        }
+      >
+        import-overlap
+      </button>
+      <button
+        onClick={() =>
+          importState({
+            drawerWidth: 4,
+            drawerLength: 4,
+            placements: [
+              { id: 'p1', binId: 'bin-2x2', x: 0, y: 0 },
+              { id: 'p2', binId: 'bin-2x2', x: 0, y: 0 }
+            ],
+            usage: { 'bin-2x2': 2 }
+          })
+        }
+      >
+        import-overlap-4x4
+      </button>
+      <button
+        onClick={() =>
+          importState({
+            drawerWidth: 4,
+            drawerLength: 4,
+            placements: [{ id: 'p1', binId: 'bin-2x2', x: -1, y: 3 }],
+            usage: { 'bin-2x2': 1 }
+          })
+        }
+      >
+        import-out-of-bounds
+      </button>
+    </div>
+  );
+}
+
+describe('LayoutProvider', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    history.replaceState({}, '', '/');
+  });
+
+  it('adds, moves, undoes, and redoes placements', () => {
+    render(
+      <LayoutProvider>
+        <Harness />
+      </LayoutProvider>
+    );
+
+    fireEvent.click(screen.getByText('add'));
+    expect(screen.getByTestId('count').textContent).toBe('1');
+    expect(screen.getByTestId('can-undo').textContent).toBe('true');
+    expect(screen.getByTestId('usage').textContent).toContain('bin-2x2');
+
+    fireEvent.click(screen.getByText('move'));
+    fireEvent.click(screen.getByText('undo'));
+    expect(screen.getByTestId('count').textContent).toBe('1');
+    expect(screen.getByTestId('can-redo').textContent).toBe('true');
+
+    fireEvent.click(screen.getByText('redo'));
+    expect(screen.getByTestId('count').textContent).toBe('1');
+  });
+
+  it('updates drawer size and imports valid state', () => {
+    render(
+      <LayoutProvider>
+        <Harness />
+      </LayoutProvider>
+    );
+
+    fireEvent.click(screen.getByText('resize'));
+    expect(screen.getByTestId('drawer').textContent).toBe('30x20');
+
+    fireEvent.click(screen.getByText('import-ok'));
+    expect(screen.getByTestId('drawer').textContent).toBe('24x18');
+  });
+
+  it('autofits when adding onto an occupied area', () => {
+    render(
+      <LayoutProvider>
+        <Harness />
+      </LayoutProvider>
+    );
+
+    fireEvent.click(screen.getByText('resize-4x4'));
+    fireEvent.click(screen.getByText('add-2x2-00'));
+    fireEvent.click(screen.getByText('add-2x2-00-dup'));
+    expect(screen.getByTestId('last-status').textContent).toBe('autofit');
+  });
+
+  it('blocks placement when drawer is full', () => {
+    render(
+      <LayoutProvider>
+        <Harness />
+      </LayoutProvider>
+    );
+
+    fireEvent.click(screen.getByText('resize-2x2'));
+    fireEvent.click(screen.getByText('add-2x2-for-autofit'));
+    fireEvent.click(screen.getByText('add-2x2-00-dup'));
+    expect(screen.getByTestId('last-status').textContent).toBe('blocked');
+  });
+
+  it('rejects invalid import state', () => {
+    render(
+      <LayoutProvider>
+        <Harness />
+      </LayoutProvider>
+    );
+
+    fireEvent.click(screen.getByText('import-bad'));
+    expect(screen.getByTestId('drawer').textContent).toBe('24x18');
+
+    fireEvent.click(screen.getByText('import-bad-shape'));
+    expect(screen.getByTestId('drawer').textContent).toBe('24x18');
+  });
+
+  it('loads from localStorage on mount', () => {
+    localStorage.setItem(
+      'bin-layout-state',
+      JSON.stringify({
+        drawerWidth: 10,
+        drawerLength: 12,
+        placements: [{ id: 'p1', binId: 'bin-2x2', x: 1, y: 1 }],
+        usage: { 'bin-2x2': 1 }
+      })
+    );
+
+    render(
+      <LayoutProvider>
+        <Harness />
+      </LayoutProvider>
+    );
+
+    expect(screen.getByTestId('count').textContent).toBe('1');
+    expect(screen.getByTestId('drawer').textContent).toBe('10x12');
+  });
+
+  it('loads from share link query param on mount', () => {
+    const encoded = encodeURIComponent(
+      btoa(
+        JSON.stringify({
+          drawerWidth: 8,
+          drawerLength: 9,
+          placements: [{ id: 'p1', binId: 'bin-2x2', x: 1, y: 1 }],
+          usage: { 'bin-2x2': 1 }
+        })
+      )
+    );
+    history.replaceState({}, '', `/?layout=${encoded}`);
+
+    render(
+      <LayoutProvider>
+        <Harness />
+      </LayoutProvider>
+    );
+
+    expect(screen.getByTestId('drawer').textContent).toBe('8x9');
+    expect(screen.getByTestId('count').textContent).toBe('1');
+  });
+
+  it('ignores share link payloads with missing fields', () => {
+    const encoded = encodeURIComponent(btoa(JSON.stringify({ drawerWidth: 8, drawerLength: 9 })));
+    history.replaceState({}, '', `/?layout=${encoded}`);
+    render(
+      <LayoutProvider>
+        <Harness />
+      </LayoutProvider>
+    );
+    expect(screen.getByTestId('drawer').textContent).toBe('24x18');
+  });
+
+  it('handles invalid share link param gracefully', () => {
+    history.replaceState({}, '', '/?layout=not-base64');
+    render(
+      <LayoutProvider>
+        <Harness />
+      </LayoutProvider>
+    );
+    expect(screen.getByTestId('drawer').textContent).toBe('24x18');
+  });
+
+  it('handles invalid localStorage JSON gracefully', () => {
+    localStorage.setItem('bin-layout-state', '{bad json');
+    render(
+      <LayoutProvider>
+        <Harness />
+      </LayoutProvider>
+    );
+    expect(screen.getByTestId('drawer').textContent).toBe('24x18');
+  });
+
+  it('returns blocked for missing bin or placement', () => {
+    render(
+      <LayoutProvider>
+        <Harness />
+      </LayoutProvider>
+    );
+    fireEvent.click(screen.getByText('add-missing'));
+    expect(screen.getByTestId('last-status').textContent).toBe('blocked');
+    fireEvent.click(screen.getByText('move-missing'));
+    expect(screen.getByTestId('last-status').textContent).toBe('blocked');
+  });
+
+  it('removePlacement updates count', () => {
+    render(
+      <LayoutProvider>
+        <Harness />
+      </LayoutProvider>
+    );
+    fireEvent.click(screen.getByText('add'));
+    expect(screen.getByTestId('count').textContent).toBe('1');
+    fireEvent.click(screen.getByText('remove'));
+    expect(screen.getByTestId('count').textContent).toBe('0');
+  });
+
+  it('undo/redo no-ops when history is empty', () => {
+    render(
+      <LayoutProvider>
+        <Harness />
+      </LayoutProvider>
+    );
+    fireEvent.click(screen.getByText('undo'));
+    fireEvent.click(screen.getByText('redo'));
+    expect(screen.getByTestId('count').textContent).toBe('0');
+  });
+
+  it('keyboard shortcuts ignore non-meta presses', () => {
+    render(
+      <LayoutProvider>
+        <Harness />
+      </LayoutProvider>
+    );
+    fireEvent.click(screen.getByText('add'));
+    fireEvent.keyDown(window, { key: 'z', shiftKey: false, metaKey: false, ctrlKey: false });
+    expect(screen.getByTestId('count').textContent).toBe('1');
+  });
+
+  it('keyboard shortcuts undo and redo when history is available', () => {
+    render(
+      <LayoutProvider>
+        <Harness />
+      </LayoutProvider>
+    );
+    fireEvent.click(screen.getByText('add'));
+    fireEvent.keyDown(window, { key: 'z', shiftKey: false, metaKey: true, ctrlKey: false });
+    expect(screen.getByTestId('count').textContent).toBe('0');
+    fireEvent.keyDown(window, { key: 'z', shiftKey: true, metaKey: true, ctrlKey: false });
+    expect(screen.getByTestId('count').textContent).toBe('1');
+  });
+
+  it('autofits when moving into an occupied spot', () => {
+    render(
+      <LayoutProvider>
+        <Harness />
+      </LayoutProvider>
+    );
+    fireEvent.click(screen.getByText('resize-4x4'));
+    fireEvent.click(screen.getByText('add-2x2-00'));
+    fireEvent.click(screen.getByText('add-2x2-20'));
+    fireEvent.click(screen.getByText('move-second-to-00'));
+    expect(screen.getByTestId('last-status').textContent).toBe('autofit');
+  });
+
+  it('importState falls back to existing usage when missing', () => {
+    render(
+      <LayoutProvider>
+        <Harness />
+      </LayoutProvider>
+    );
+    fireEvent.click(screen.getByText('add'));
+    fireEvent.click(screen.getByText('import-no-usage'));
+    expect(screen.getByTestId('usage').textContent).toContain('bin-2x2');
+  });
+
+  it('blocked move returns when no space is available', () => {
+    render(
+      <LayoutProvider>
+        <Harness />
+      </LayoutProvider>
+    );
+    fireEvent.click(screen.getByText('import-overlap'));
+    fireEvent.click(screen.getByText('move-second-to-00'));
+    expect(screen.getByTestId('last-status').textContent).toBe('blocked');
+  });
+
+  it('imports out-of-bounds placements without crashing', () => {
+    render(
+      <LayoutProvider>
+        <Harness />
+      </LayoutProvider>
+    );
+    fireEvent.click(screen.getByText('import-out-of-bounds'));
+    expect(screen.getByTestId('count').textContent).toBe('1');
+  });
+
+  it('suggestLayout no-ops on empty layouts', () => {
+    render(
+      <LayoutProvider>
+        <Harness />
+      </LayoutProvider>
+    );
+    fireEvent.click(screen.getByText('suggest-layout'));
+    expect(screen.getByTestId('last-suggest').textContent).toBe('applied');
+    expect(screen.getByTestId('last-suggest-moved').textContent).toBe('0');
+  });
+
+  it('suggestLayout resolves overlaps when space exists', () => {
+    render(
+      <LayoutProvider>
+        <Harness />
+      </LayoutProvider>
+    );
+    fireEvent.click(screen.getByText('import-overlap-4x4'));
+    fireEvent.click(screen.getByText('suggest-layout'));
+    expect(screen.getByTestId('last-suggest').textContent).toBe('applied');
+    expect(Number(screen.getByTestId('last-suggest-moved').textContent)).toBeGreaterThan(0);
+    const placements = JSON.parse(screen.getByTestId('placements').textContent ?? '[]') as { x: number; y: number }[];
+    const unique = new Set(placements.map((p) => `${p.x},${p.y}`));
+    expect(unique.size).toBe(placements.length);
+  });
+
+  it('suggestLayout blocks when bins cannot fit', () => {
+    render(
+      <LayoutProvider>
+        <Harness />
+      </LayoutProvider>
+    );
+    fireEvent.click(screen.getByText('import-overlap'));
+    fireEvent.click(screen.getByText('suggest-layout'));
+    expect(screen.getByTestId('last-suggest').textContent).toBe('blocked');
+    expect(screen.getByTestId('last-suggest-moved').textContent).toBe('0');
+  });
+
+  it('logs warnings and errors in dev mode', () => {
+    const env = import.meta.env as unknown as Record<string, unknown>;
+    const originalMode = env.MODE;
+    const originalDev = env.DEV;
+    env.MODE = 'development';
+    env.DEV = true;
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    localStorage.setItem('bin-layout-state', '{bad json');
+    const encoded = encodeURIComponent(
+      btoa(
+        JSON.stringify({
+          drawerWidth: 4,
+          drawerLength: 4,
+          placements: [
+            { id: 'p1', binId: 'bin-2x2', x: 0, y: 0 },
+            { id: 'p2', binId: 'bin-2x2', x: 0, y: 0 }
+          ],
+          usage: { 'bin-2x2': 2 }
+        })
+      )
+    );
+    history.replaceState({}, '', `/?layout=${encoded}`);
+
+    render(
+      <LayoutProvider>
+        <Harness />
+      </LayoutProvider>
+    );
+
+    expect(warnSpy).toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalled();
+
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
+    env.MODE = originalMode;
+    env.DEV = originalDev;
+  });
+});
