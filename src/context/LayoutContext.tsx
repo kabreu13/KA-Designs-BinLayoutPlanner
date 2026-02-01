@@ -18,6 +18,10 @@ export interface Placement {
   binId: string;
   x: number; // inches from left
   y: number; // inches from top
+  width?: number;
+  length?: number;
+  color?: string;
+  label?: string;
 }
 
 interface LayoutState {
@@ -43,6 +47,7 @@ export interface PlacementResult {
 }
 
 export type SuggestLayoutStatus = 'applied' | 'blocked';
+export type SuggestLayoutMode = 'pack' | 'random';
 
 export interface SuggestLayoutResult {
   status: SuggestLayoutStatus;
@@ -57,13 +62,14 @@ interface LayoutContextValue {
   binUsage: Record<string, number>;
   addPlacement: (binId: string, x?: number, y?: number) => PlacementResult;
   movePlacement: (placementId: string, x: number, y: number) => PlacementResult;
+  updatePlacement: (placementId: string, updates: Partial<Pick<Placement, 'width' | 'length' | 'color' | 'label'>>) => PlacementResult;
   removePlacement: (placementId: string) => void;
   setDrawerSize: (width: number, length: number) => void;
   undo: () => void;
   redo: () => void;
   canUndo: boolean;
   canRedo: boolean;
-  suggestLayout: () => SuggestLayoutResult;
+  suggestLayout: (mode: SuggestLayoutMode) => SuggestLayoutResult;
   exportState: () => LayoutState;
   importState: (incoming: LayoutState) => boolean;
   spaceUsedPercent: number;
@@ -99,6 +105,13 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
   }));
 
   const state = history.present;
+  const getPlacementSize = (placement: Placement) => {
+    const bin = BINS.find((b) => b.id === placement.binId);
+    const width = placement.width ?? bin?.width;
+    const length = placement.length ?? bin?.length;
+    if (width == null || length == null) return null;
+    return { width, length };
+  };
 
   // Load from localStorage once
   useEffect(() => {
@@ -158,15 +171,15 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
     if (!import.meta.env?.DEV) return;
     const problems: string[] = [];
     state.placements.forEach((placement) => {
-      const bin = BINS.find((b) => b.id === placement.binId);
-      if (!bin) return;
+      const size = getPlacementSize(placement);
+      if (!size) return;
       if (placement.x < 0 || placement.y < 0) {
         problems.push(`Placement ${placement.id} has negative coords`);
       }
-      if (placement.x + bin.width > state.drawerWidth || placement.y + bin.length > state.drawerLength) {
+      if (placement.x + size.width > state.drawerWidth || placement.y + size.length > state.drawerLength) {
         problems.push(`Placement ${placement.id} out of bounds`);
       }
-      if (hasCollision(bin, placement.x, placement.y, state.placements, BINS, placement.id)) {
+      if (hasCollision(size, placement.x, placement.y, state.placements, BINS, placement.id)) {
         problems.push(`Placement ${placement.id} overlaps another placement`);
       }
     });
@@ -219,7 +232,9 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
           id: crypto.randomUUID ? crypto.randomUUID() : `placement-${Date.now()}-${Math.random()}`,
           binId,
           x: target.x,
-          y: target.y
+          y: target.y,
+          width: bin.width,
+          length: bin.length
         }
       ],
       usage: { ...state.usage, [binId]: (state.usage[binId] ?? 0) + 1 }
@@ -233,17 +248,17 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
     const next = (() => {
       const placement = state.placements.find((p) => p.id === placementId);
       if (!placement) return null;
-      const bin = BINS.find((b) => b.id === placement.binId);
-      if (!bin) return null;
-      const { x: safeX, y: safeY } = clampPosition(x, y, bin, state.drawerWidth, state.drawerLength);
+      const size = getPlacementSize(placement);
+      if (!size) return null;
+      const { x: safeX, y: safeY } = clampPosition(x, y, size, state.drawerWidth, state.drawerLength);
 
       let status: PlacementResultStatus = 'placed';
       let target = { x: safeX, y: safeY };
 
-      const collision = hasCollision(bin, safeX, safeY, state.placements, BINS, placementId);
+      const collision = hasCollision(size, safeX, safeY, state.placements, BINS, placementId);
       if (collision) {
         const suggestion = findFirstFit(
-          bin,
+          size,
           safeX,
           safeY,
           state.placements.filter((p) => p.id !== placementId),
@@ -273,30 +288,118 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
     return result;
   };
 
-  const suggestLayout = (): SuggestLayoutResult => {
+  const updatePlacement = (
+    placementId: string,
+    updates: Partial<Pick<Placement, 'width' | 'length' | 'color' | 'label'>>
+  ): PlacementResult => {
+    let result: PlacementResult = { status: 'blocked' };
+    const next = (() => {
+      const placement = state.placements.find((p) => p.id === placementId);
+      if (!placement) return null;
+      const currentSize = getPlacementSize(placement);
+      if (!currentSize) return null;
+
+      const nextWidth = updates.width ?? currentSize.width;
+      const nextLength = updates.length ?? currentSize.length;
+      const size = { width: nextWidth, length: nextLength };
+      if (size.width < 2 || size.length < 2 || size.width > 8 || size.length > 8) {
+        result = { status: 'blocked' };
+        return null;
+      }
+      if (size.width > state.drawerWidth || size.length > state.drawerLength) {
+        result = { status: 'blocked' };
+        return null;
+      }
+      const { x: safeX, y: safeY } = clampPosition(
+        placement.x,
+        placement.y,
+        size,
+        state.drawerWidth,
+        state.drawerLength
+      );
+
+      let status: PlacementResultStatus = 'placed';
+      let target = { x: safeX, y: safeY };
+      const others = state.placements.filter((p) => p.id !== placementId);
+      if (hasCollision(size, target.x, target.y, others, BINS)) {
+        const suggestion = findFirstFit(
+          size,
+          target.x,
+          target.y,
+          others,
+          BINS,
+          state.drawerWidth,
+          state.drawerLength
+        );
+        if (!suggestion) {
+          result = { status: 'blocked' };
+          return null;
+        }
+        target = suggestion;
+        status = 'autofit';
+      }
+
+      result = { status, position: target };
+      return {
+        ...state,
+        placements: state.placements.map((p) =>
+          p.id === placementId
+            ? {
+                ...p,
+                ...updates,
+                width: nextWidth,
+                length: nextLength,
+                x: target.x,
+                y: target.y
+              }
+            : p
+        )
+      };
+    })();
+
+    if (next) pushState(next);
+    return result;
+  };
+
+  const suggestLayout = (mode: SuggestLayoutMode): SuggestLayoutResult => {
     if (state.placements.length === 0) {
       return { status: 'applied', moved: 0 };
     }
 
+    const originalById = new Map(state.placements.map((p) => [p.id, p]));
+    const ordered =
+      mode === 'random'
+        ? [...state.placements].sort(() => Math.random() - 0.5)
+        : [...state.placements];
+
     const nextPlacements: Placement[] = [];
     let moved = 0;
 
-    for (const placement of state.placements) {
-      const bin = BINS.find((b) => b.id === placement.binId);
-      if (!bin) return { status: 'blocked', moved };
+    for (const placement of ordered) {
+      const currentSize = getPlacementSize(placement);
+      if (!currentSize) return { status: 'blocked', moved };
+      if (currentSize.width > state.drawerWidth || currentSize.length > state.drawerLength) {
+        return { status: 'blocked', moved };
+      }
 
+      const maxX = Math.max(0, state.drawerWidth - currentSize.width);
+      const maxY = Math.max(0, state.drawerLength - currentSize.length);
+      const startX =
+        mode === 'random' ? Math.round(Math.random() * maxX) : 0;
+      const startY =
+        mode === 'random' ? Math.round(Math.random() * maxY) : 0;
       const { x: safeX, y: safeY } = clampPosition(
-        placement.x,
-        placement.y,
-        bin,
+        startX,
+        startY,
+        currentSize,
         state.drawerWidth,
         state.drawerLength
       );
-      let target = { x: safeX, y: safeY };
 
-      if (hasCollision(bin, target.x, target.y, nextPlacements, BINS)) {
-        const suggestion = findFirstFit(
-          bin,
+      let target = { x: safeX, y: safeY };
+      if (hasCollision(currentSize, target.x, target.y, nextPlacements, BINS)) {
+        let suggestion = findFirstFit(
+          currentSize,
           target.x,
           target.y,
           nextPlacements,
@@ -304,13 +407,26 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
           state.drawerWidth,
           state.drawerLength
         );
+        if (!suggestion && mode === 'random') {
+          suggestion = findFirstFit(
+            currentSize,
+            0,
+            0,
+            nextPlacements,
+            BINS,
+            state.drawerWidth,
+            state.drawerLength
+          );
+        }
         if (!suggestion) return { status: 'blocked', moved };
         target = suggestion;
       }
 
-      if (target.x !== placement.x || target.y !== placement.y) {
+      const original = originalById.get(placement.id);
+      if (!original || target.x !== original.x || target.y !== original.y) {
         moved += 1;
       }
+
       nextPlacements.push({ ...placement, x: target.x, y: target.y });
     }
 
@@ -393,9 +509,9 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
   const { spaceUsedPercent } = useMemo(() => {
     const totalArea = state.drawerWidth * state.drawerLength;
     const usedArea = state.placements.reduce((sum, placement) => {
-      const bin = BINS.find((b) => b.id === placement.binId);
-      if (!bin) return sum;
-      return sum + bin.width * bin.length;
+      const size = getPlacementSize(placement);
+      if (!size) return sum;
+      return sum + size.width * size.length;
     }, 0);
     return {
       spaceUsedPercent: totalArea > 0 ? Math.min(100, (usedArea / totalArea) * 100) : 0
@@ -410,6 +526,7 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
     binUsage: state.usage,
     addPlacement,
     movePlacement,
+    updatePlacement,
     removePlacement,
     setDrawerSize,
     undo,

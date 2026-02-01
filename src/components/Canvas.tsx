@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { MouseEvent as ReactMouseEvent } from 'react';
 import { useDndMonitor, useDroppable, useDraggable } from '@dnd-kit/core';
 import { Button } from './ui/Button';
 import { Grid, Sparkles, RotateCcw, RotateCw, Magnet } from 'lucide-react';
@@ -8,6 +9,9 @@ import type { Bin, Placement } from '../context/LayoutContext';
 
 const GRID_SIZE = 25; // px per inch on canvas
 const FRAME_THROTTLE_MS = 16; // ~60fps
+const SIZE_STEP = 2;
+const MIN_BIN_SIZE = 2;
+const MAX_BIN_SIZE = 8;
 
 export function Canvas() {
   const {
@@ -17,6 +21,7 @@ export function Canvas() {
     drawerLength,
     addPlacement,
     movePlacement,
+    updatePlacement,
     undo,
     redo,
     canUndo,
@@ -31,11 +36,16 @@ export function Canvas() {
   };
 
   const [showGrid, setShowGrid] = useState(true);
-  const [snap, setSnap] = useState<0.5 | 1>(1);
+  const [snap, setSnap] = useState(1);
+  const [suggestMode, setSuggestMode] = useState<'pack' | 'random'>('pack');
   const [toast, setToast] = useState<{ type: 'info' | 'error'; message: string } | null>(null);
   const [dragStatus, setDragStatus] = useState<{ placementId: string; fits: boolean } | null>(null);
+  const [editor, setEditor] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [labelDraft, setLabelDraft] = useState('');
+  const [colorDraft, setColorDraft] = useState('#ffffff');
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const dropAreaRef = useRef<HTMLDivElement | null>(null);
+  const editorRef = useRef<HTMLDivElement | null>(null);
   const lastFrameRef = useRef<number>(0);
   const activeDragRef = useRef<DragItem | null>(null);
   const pointerOriginRef = useRef<Point | null>(null);
@@ -48,17 +58,81 @@ export function Canvas() {
     return () => window.clearTimeout(id);
   }, [toast]);
 
+  useEffect(() => {
+    if (placements.length === 0) {
+      setSuggestMode('pack');
+    }
+  }, [placements.length]);
+
+  useEffect(() => {
+    if (!editor) return;
+    const placement = placements.find((p) => p.id === editor.id);
+    if (!placement) return;
+    setLabelDraft(placement.label ?? '');
+    setColorDraft(placement.color ?? '#ffffff');
+  }, [editor?.id, placements]);
+
+  useEffect(() => {
+    if (!editor) return;
+    const handlePointer = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (editorRef.current?.contains(target)) return;
+      setEditor(null);
+    };
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setEditor(null);
+    };
+    window.addEventListener('mousedown', handlePointer);
+    window.addEventListener('keydown', handleKey);
+    return () => {
+      window.removeEventListener('mousedown', handlePointer);
+      window.removeEventListener('keydown', handleKey);
+    };
+  }, [editor]);
+
   const handleSuggestLayout = () => {
-    const result = suggestLayout();
+    const mode = suggestMode;
+    const result = suggestLayout(mode);
     if (result.status === 'blocked') {
       setToast({ type: 'error', message: 'No layout fits all bins in the drawer.' });
       return;
     }
+    if (mode === 'pack') {
+      setSuggestMode('random');
+    }
     if (result.moved === 0) {
-      setToast({ type: 'info', message: 'Layout already fits.' });
+      setToast({
+        type: 'info',
+        message: mode === 'pack' ? 'Bins already packed.' : 'Random layout matched current layout.'
+      });
       return;
     }
-    setToast({ type: 'info', message: 'Suggested layout applied.' });
+    setToast({ type: 'info', message: mode === 'pack' ? 'Bins packed together.' : 'Random layout applied.' });
+  };
+
+  const handleResize = (axis: 'width' | 'length', direction: -1 | 1) => {
+    if (!selectedPlacement || !selectedSize) return;
+    const current = axis === 'width' ? selectedSize.width : selectedSize.length;
+    const next = Math.max(MIN_BIN_SIZE, Math.min(MAX_BIN_SIZE, current + direction * SIZE_STEP));
+    if (next === current) return;
+    const result = updatePlacement(selectedPlacement.id, { [axis]: next });
+    if (result.status === 'blocked') {
+      setToast({ type: 'error', message: 'Cannot resize — no space available.' });
+    } else if (result.status === 'autofit') {
+      setToast({ type: 'info', message: 'Resized and auto-fit to the nearest space.' });
+    }
+  };
+
+  const commitLabel = () => {
+    if (!selectedPlacement) return;
+    updatePlacement(selectedPlacement.id, { label: labelDraft.trim() });
+  };
+
+  const handleColorChange = (value: string) => {
+    if (!selectedPlacement) return;
+    setColorDraft(value);
+    updatePlacement(selectedPlacement.id, { color: value });
   };
 
   const gridSize = GRID_SIZE;
@@ -69,10 +143,25 @@ export function Canvas() {
 
   const { setNodeRef: setDropNodeRef } = useDroppable({ id: 'drop-area' });
 
+  const clampSnap = (value: number) => Math.max(0.5, Math.min(2, value));
+  const snapValue = clampSnap(snap);
+  const applySnap = (value: number) => Math.round(value / snapValue) * snapValue;
+
+  const getPlacementSize = (placement: Placement) => {
+    const bin = bins.find((b) => b.id === placement.binId);
+    const width = placement.width ?? bin?.width;
+    const length = placement.length ?? bin?.length;
+    if (width == null || length == null) return null;
+    return { width, length, bin };
+  };
+
   const attachDropAreaRef = (node: HTMLDivElement | null) => {
     dropAreaRef.current = node;
     setDropNodeRef(node);
   };
+
+  const selectedPlacement = editor ? placements.find((p) => p.id === editor.id) : null;
+  const selectedSize = selectedPlacement ? getPlacementSize(selectedPlacement) : null;
 
   const isTouchEvent = (e: Event): e is TouchEvent =>
     typeof TouchEvent !== 'undefined' && (e instanceof TouchEvent || 'touches' in e || 'changedTouches' in e);
@@ -96,31 +185,51 @@ export function Canvas() {
     const offset = dragOffsetRef.current ?? { x: 0, y: 0 };
     const rawX = (point.x - rect.left - offset.x) / gridSize;
     const rawY = (point.y - rect.top - offset.y) / gridSize;
-    const bin = bins.find((b) => b.id === drag.binId);
-    if (!bin) return null;
-    const maxX = Math.max(0, drawerWidth - bin.width);
-    const maxY = Math.max(0, drawerLength - bin.length);
-    const isOutOfBounds = rawX < 0 || rawY < 0 || rawX > maxX || rawY > maxY;
-    const x = Math.max(0, Math.min(rawX, maxX));
-    const y = Math.max(0, Math.min(rawY, maxY));
-    return { rawX, rawY, x, y, bin, isOutOfBounds };
+    const size =
+      drag.type === 'bin'
+        ? (() => {
+            const bin = bins.find((b) => b.id === drag.binId);
+            if (!bin) return null;
+            return { width: bin.width, length: bin.length };
+          })()
+        : (() => {
+            const placement = placements.find((p) => p.id === drag.placementId);
+            if (!placement) return null;
+            return getPlacementSize(placement);
+          })();
+    if (!size) return null;
+    const snappedX = applySnap(rawX);
+    const snappedY = applySnap(rawY);
+    const maxX = Math.max(0, drawerWidth - size.width);
+    const maxY = Math.max(0, drawerLength - size.length);
+    const isOutOfBounds = snappedX < 0 || snappedY < 0 || snappedX > maxX || snappedY > maxY;
+    const x = Math.max(0, Math.min(snappedX, maxX));
+    const y = Math.max(0, Math.min(snappedY, maxY));
+    return { rawX, rawY, x, y, size, isOutOfBounds };
   };
 
   const computePlacementTargetFromDelta = (delta: Point, drag: DragItem) => {
     if (drag.type !== 'placement' || !originPlacementRef.current) return null;
-    const bin = bins.find((b) => b.id === drag.binId);
-    if (!bin) return null;
+    const placement = placements.find((p) => p.id === drag.placementId);
+    if (!placement) return null;
+    const size = getPlacementSize(placement);
+    if (!size) return null;
     const rawX = originPlacementRef.current.x + delta.x / gridSize;
     const rawY = originPlacementRef.current.y + delta.y / gridSize;
-    const maxX = Math.max(0, drawerWidth - bin.width);
-    const maxY = Math.max(0, drawerLength - bin.length);
-    const isOutOfBounds = rawX < 0 || rawY < 0 || rawX > maxX || rawY > maxY;
-    const x = Math.max(0, Math.min(rawX, maxX));
-    const y = Math.max(0, Math.min(rawY, maxY));
-    return { rawX, rawY, x, y, bin, isOutOfBounds };
+    const snappedX = applySnap(rawX);
+    const snappedY = applySnap(rawY);
+    const maxX = Math.max(0, drawerWidth - size.width);
+    const maxY = Math.max(0, drawerLength - size.length);
+    const isOutOfBounds = snappedX < 0 || snappedY < 0 || snappedX > maxX || snappedY > maxY;
+    const x = Math.max(0, Math.min(snappedX, maxX));
+    const y = Math.max(0, Math.min(snappedY, maxY));
+    return { rawX, rawY, x, y, size, isOutOfBounds };
   };
 
-  const getDragDelta = (event: { active: { rect: { current: { initial: DOMRect | null; translated: DOMRect | null } } }; delta: Point }) => {
+  const getDragDelta = (event: {
+    active: { rect: { current: { initial: { left: number; top: number } | null; translated: { left: number; top: number } | null } } };
+    delta: Point;
+  }) => {
     const initial = event.active.rect.current.initial;
     const translated = event.active.rect.current.translated;
     if (initial && translated) {
@@ -129,15 +238,15 @@ export function Canvas() {
     return event.delta;
   };
 
-  const hasCollisionAt = (bin: Bin, x: number, y: number, ignoreId?: string) =>
+  const hasCollisionAt = (bin: { width: number; length: number }, x: number, y: number, ignoreId?: string) =>
     placements.some((p) => {
       if (ignoreId && p.id === ignoreId) return false;
-      const other = bins.find((b) => b.id === p.binId);
-      if (!other) return false;
+      const otherSize = getPlacementSize(p);
+      if (!otherSize) return false;
       return (
-        x < p.x + other.width &&
+        x < p.x + otherSize.width &&
         x + bin.width > p.x &&
-        y < p.y + other.length &&
+        y < p.y + otherSize.length &&
         y + bin.length > p.y
       );
     });
@@ -224,7 +333,7 @@ export function Canvas() {
       const drop = computePlacementTargetFromDelta(delta, activeDragRef.current);
       if (!drop) return;
 
-      const collision = hasCollisionAt(drop.bin, drop.x, drop.y, activeDragRef.current.placementId);
+      const collision = hasCollisionAt(drop.size, drop.x, drop.y, activeDragRef.current.placementId);
       setDragStatus({
         placementId: activeDragRef.current.placementId,
         fits: !collision && !drop.isOutOfBounds
@@ -319,15 +428,19 @@ export function Canvas() {
             data-testid="canvas-drop-area"
           >
             {placements.map((placement) => {
-              const bin = bins.find((b) => b.id === placement.binId);
-              if (!bin) return null;
+              const size = getPlacementSize(placement);
+              if (!size) return null;
               return (
                 <DraggablePlacement
                   key={placement.id}
                   placement={placement}
-                  bin={bin}
+                  size={size}
                   gridSize={gridSize}
                   dragStatus={dragStatus}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setEditor({ id: placement.id, x: event.clientX, y: event.clientY });
+                  }}
                 />
               );
             })}
@@ -374,15 +487,25 @@ export function Canvas() {
           <Grid className="h-4 w-4" />
         </button>
 
-        <button
-          onClick={() => setSnap((s) => (s === 1 ? 0.5 : 1))}
-          title={`Snap to ${snap === 1 ? '1"' : '0.5"'}`}
-          className={`p-2 rounded-full transition-colors ${
-            snap === 1 ? 'bg-slate-100 text-slate-700' : 'bg-[#14476B]/10 text-[#14476B]'
-          }`}
-        >
-          <Magnet className="h-4 w-4" />
-        </button>
+        <div className="flex items-center gap-2">
+          <div className="p-2 rounded-full bg-slate-100 text-slate-700">
+            <Magnet className="h-4 w-4" />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-500">Snap</span>
+            <input
+              aria-label="Snap distance"
+              title="Snap distance (inches)"
+              type="number"
+              min={0.5}
+              max={2}
+              step={0.5}
+              value={snap}
+              onChange={(e) => setSnap(clampSnap(Number(e.target.value) || 0.5))}
+              className="w-14 px-2 py-1 text-xs rounded-md border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#14476B]/20"
+            />
+          </div>
+        </div>
 
         <div className="w-px h-4 bg-slate-200" />
 
@@ -397,6 +520,111 @@ export function Canvas() {
           Suggest Layout
         </Button>
       </div>
+
+      {editor && selectedPlacement && selectedSize && (
+        <div
+          ref={editorRef}
+          data-testid="placement-editor"
+          className="fixed z-50 w-60 rounded-xl border border-slate-200 bg-white shadow-xl p-3 text-sm"
+          style={{ left: editor.x + 12, top: editor.y + 12 }}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-slate-700">Edit Bin</span>
+            <button
+              type="button"
+              onClick={() => setEditor(null)}
+              className="text-slate-400 hover:text-slate-600 text-xs"
+            >
+              Close
+            </button>
+          </div>
+
+          <div className="space-y-2">
+            <label className="flex flex-col gap-1 text-[11px] text-slate-500">
+              Label
+              <input
+                data-testid="placement-label"
+                type="text"
+                value={labelDraft}
+                onChange={(e) => setLabelDraft(e.target.value)}
+                onBlur={commitLabel}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    commitLabel();
+                    (e.target as HTMLInputElement).blur();
+                  }
+                }}
+                className="w-full rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#14476B]/20"
+                placeholder="Optional label"
+              />
+            </label>
+
+            <label className="flex items-center justify-between text-[11px] text-slate-500">
+              Color
+              <input
+                data-testid="placement-color"
+                type="color"
+                value={colorDraft}
+                onChange={(e) => handleColorChange(e.target.value)}
+                className="h-7 w-10 rounded-md border border-slate-200 bg-white"
+              />
+            </label>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-[11px] text-slate-500">
+                <span>Width</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    data-testid="size-width-decrease"
+                    onClick={() => handleResize('width', -1)}
+                    disabled={selectedSize.width <= MIN_BIN_SIZE}
+                    className="h-6 w-6 rounded-full border border-slate-200 text-slate-600 disabled:opacity-40"
+                  >
+                    -
+                  </button>
+                  <span className="text-xs font-medium text-slate-700">{selectedSize.width}"</span>
+                  <button
+                    type="button"
+                    data-testid="size-width-increase"
+                    onClick={() => handleResize('width', 1)}
+                    disabled={selectedSize.width >= MAX_BIN_SIZE}
+                    className="h-6 w-6 rounded-full border border-slate-200 text-slate-600 disabled:opacity-40"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between text-[11px] text-slate-500">
+                <span>Length</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    data-testid="size-length-decrease"
+                    onClick={() => handleResize('length', -1)}
+                    disabled={selectedSize.length <= MIN_BIN_SIZE}
+                    className="h-6 w-6 rounded-full border border-slate-200 text-slate-600 disabled:opacity-40"
+                  >
+                    -
+                  </button>
+                  <span className="text-xs font-medium text-slate-700">{selectedSize.length}"</span>
+                  <button
+                    type="button"
+                    data-testid="size-length-increase"
+                    onClick={() => handleResize('length', 1)}
+                    disabled={selectedSize.length >= MAX_BIN_SIZE}
+                    className="h-6 w-6 rounded-full border border-slate-200 text-slate-600 disabled:opacity-40"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+            </div>
+            <p className="text-[10px] text-slate-400">Sizes adjust in {SIZE_STEP}" steps (min {MIN_BIN_SIZE}", max {MAX_BIN_SIZE}").</p>
+          </div>
+        </div>
+      )}
 
       {toast && (
         <div
@@ -413,14 +641,16 @@ export function Canvas() {
 
 function DraggablePlacement({
   placement,
-  bin,
+  size,
   gridSize,
-  dragStatus
+  dragStatus,
+  onClick
 }: {
   placement: Placement;
-  bin: Bin;
+  size: { width: number; length: number; bin?: Bin };
   gridSize: number;
   dragStatus: { placementId: string; fits: boolean } | null;
+  onClick: (event: ReactMouseEvent<HTMLDivElement>) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `placement-${placement.id}`,
@@ -440,21 +670,44 @@ function DraggablePlacement({
       style={{
         left: `${placement.x * gridSize}px`,
         top: `${placement.y * gridSize}px`,
-        width: `${bin.width * gridSize}px`,
-        height: `${bin.length * gridSize}px`,
+        width: `${size.width * gridSize}px`,
+        height: `${size.length * gridSize}px`,
         transform: translate,
         transition: isDragging ? 'none' : undefined,
         zIndex: isDragging ? 30 : undefined,
         opacity: isDragging ? 0.55 : 1,
-        borderColor
+        borderColor,
+        backgroundColor: placement.color ?? undefined,
+        color: placement.color ? getContrastText(placement.color) : undefined
+      }}
+      onClick={(event) => {
+        if (isDragging) return;
+        onClick(event);
       }}
       {...listeners}
       {...attributes}
     >
-      <span className="text-[10px] font-medium text-slate-500 group-hover:text-[#14476B]">
-        {bin.width}x{bin.length}
-      </span>
+      <div className="flex flex-col items-center gap-0.5">
+        {placement.label && (
+          <span className="text-[10px] font-semibold leading-none">
+            {placement.label}
+          </span>
+        )}
+        <span className="text-[10px] font-medium leading-none">
+          {size.width}x{size.length}
+        </span>
+      </div>
       <div className="absolute bottom-1 right-1 w-1.5 h-1.5 rounded-full bg-slate-300 opacity-0 group-hover:opacity-100" />
     </div>
   );
+}
+
+function getContrastText(color: string) {
+  const hex = color.replace('#', '');
+  const normalized = hex.length === 3 ? hex.split('').map((c) => c + c).join('') : hex;
+  const r = parseInt(normalized.slice(0, 2), 16);
+  const g = parseInt(normalized.slice(2, 4), 16);
+  const b = parseInt(normalized.slice(4, 6), 16);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance < 0.5 ? '#f8fafc' : '#0f172a';
 }

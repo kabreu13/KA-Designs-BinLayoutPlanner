@@ -1,0 +1,9 @@
+1. [DONE] Clicking on a bin opens an edit popup near the mouse with label, color, and size controls (±2", 2–8").
+2. [DONE] Suggest layout: first click packs bins, subsequent clicks randomize.
+3. [DONE] Bin Catalog preview centered in the card.
+4. [DONE] Snap now affects placement movement and is adjustable by the user.
+
+Notes:
+- Added placement editor UI, label/color persistence, and size-aware collisions.
+- Updated PDF export and summary to reflect custom sizes and labels.
+- Added/updated unit + e2e coverage (including placement editor).

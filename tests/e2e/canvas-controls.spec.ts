@@ -14,13 +14,13 @@ test('grid toggle shows/hides overlay', async ({ page }) => {
   await expect(grid).toBeVisible();
 });
 
-test('snap toggle updates title', async ({ page }) => {
+test('snap input updates value', async ({ page }) => {
   await page.goto('/');
 
-  const snapButton = page.getByTitle('Snap to 1"');
-  await snapButton.click();
-  await expect(page.getByTitle('Snap to 0.5"')).toBeVisible();
-
-  await page.getByTitle('Snap to 0.5"').click();
-  await expect(page.getByTitle('Snap to 1"')).toBeVisible();
+  const snapInput = page.getByLabel('Snap distance');
+  await expect(snapInput).toHaveValue('1');
+  await snapInput.fill('0.5');
+  await expect(snapInput).toHaveValue('0.5');
+  await snapInput.fill('1.5');
+  await expect(snapInput).toHaveValue('1.5');
 });

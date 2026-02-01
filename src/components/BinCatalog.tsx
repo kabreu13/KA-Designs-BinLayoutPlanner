@@ -98,6 +98,7 @@ export function BinCatalog() {
 
 function DraggableBinCard({ bin, onClick }: { bin: ReturnType<typeof useLayout>['bins'][number]; onClick: () => void }) {
   const maxPreview = 80;
+  const previewFrame = maxPreview + 16;
   const scale = maxPreview / Math.max(bin.width, bin.length);
   const previewWidth = bin.width * scale;
   const previewHeight = bin.length * scale;
@@ -122,7 +123,10 @@ function DraggableBinCard({ bin, onClick }: { bin: ReturnType<typeof useLayout>[
       {...attributes}
     >
       <div className="p-4 flex items-center justify-center">
-        <div className="relative">
+        <div
+          className="relative flex items-center justify-center"
+          style={{ width: `${previewFrame}px`, height: `${previewFrame}px` }}
+        >
           <div
             className="bg-slate-100 border border-slate-200"
             style={{

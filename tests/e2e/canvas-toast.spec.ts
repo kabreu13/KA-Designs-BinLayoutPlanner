@@ -5,9 +5,8 @@ const BIN_CARD = '[data-testid="bin-card"]';
 const PLACED = '[data-testid="placed-bin"]';
 
 const setDrawerSize = async (page: import('@playwright/test').Page, width: number, length: number) => {
-  const inputs = page.locator('input[type="number"]');
-  await inputs.nth(0).fill(String(width));
-  await inputs.nth(1).fill(String(length));
+  await page.getByTestId('drawer-width-input').fill(String(width));
+  await page.getByTestId('drawer-length-input').fill(String(length));
 };
 
 const searchAndClickBin = async (page: import('@playwright/test').Page, query: string) => {

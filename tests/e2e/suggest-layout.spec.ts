@@ -41,4 +41,8 @@ test('suggest layout resolves overlapping placements', async ({ page }) => {
       return unique.size;
     })
     .toBe(2);
+  await expect(page.getByText('Bins packed together.')).toBeVisible();
+
+  await suggestButton.click({ force: true });
+  await expect(page.getByText(/Random layout/)).toBeVisible();
 });

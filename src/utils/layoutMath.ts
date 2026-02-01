@@ -1,19 +1,23 @@
 import type { Bin, Placement } from '../context/LayoutContext';
 
-export function clampPosition(
-  x: number,
-  y: number,
-  bin: Bin,
-  drawerWidth: number,
-  drawerLength: number
-) {
+type Size = Pick<Bin, 'width' | 'length'>;
+
+export function clampPosition(x: number, y: number, bin: Size, drawerWidth: number, drawerLength: number) {
   const clampedX = Math.max(0, Math.min(x, drawerWidth - bin.width));
   const clampedY = Math.max(0, Math.min(y, drawerLength - bin.length));
   return { x: clampedX, y: clampedY };
 }
 
+const getPlacementSize = (placement: Placement, bins: Bin[]): Size | null => {
+  const bin = bins.find((b) => b.id === placement.binId);
+  const width = placement.width ?? bin?.width;
+  const length = placement.length ?? bin?.length;
+  if (width == null || length == null) return null;
+  return { width, length };
+};
+
 export function hasCollision(
-  bin: Bin,
+  bin: Size,
   x: number,
   y: number,
   placements: Placement[],
@@ -25,10 +29,10 @@ export function hasCollision(
 
   return placements.some((p) => {
     if (ignoreId && p.id === ignoreId) return false;
-    const otherBin = bins.find((b) => b.id === p.binId);
-    if (!otherBin) return false;
-    const oRight = p.x + otherBin.width;
-    const oBottom = p.y + otherBin.length;
+    const otherSize = getPlacementSize(p, bins);
+    if (!otherSize) return false;
+    const oRight = p.x + otherSize.width;
+    const oBottom = p.y + otherSize.length;
     const overlap =
       x < oRight &&
       right > p.x &&
@@ -47,7 +51,7 @@ export function hasFractionalPlacements(placements: Placement[], startX: number,
 }
 
 export function findFirstFit(
-  bin: Bin,
+  bin: Size,
   startX: number,
   startY: number,
   placements: Placement[],

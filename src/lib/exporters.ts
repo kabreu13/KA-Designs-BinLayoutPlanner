@@ -26,16 +26,24 @@ export async function exportLayoutToPdf(
   doc.setFontSize(8);
   doc.text(`Scale 1" = ${(1 * scale).toFixed(2)}pt`, marginX, marginY - 4);
 
+  const getPlacementSize = (placement: Placement) => {
+    const bin = bins.find((b) => b.id === placement.binId);
+    const width = placement.width ?? bin?.width;
+    const length = placement.length ?? bin?.length;
+    if (width == null || length == null) return null;
+    return { width, length, name: bin?.name ?? 'Bin' };
+  };
+
   placements.forEach((p) => {
-    const bin = bins.find((b) => b.id === p.binId);
-    if (!bin) return;
+    const size = getPlacementSize(p);
+    if (!size) return;
     const x = marginX + p.x * scale;
     const y = marginY + p.y * scale;
     doc.setFillColor(244, 246, 248);
-    doc.rect(x, y, bin.width * scale, bin.length * scale, 'FD');
+    doc.rect(x, y, size.width * scale, size.length * scale, 'FD');
     doc.setTextColor(80, 90, 104);
     doc.setFontSize(7);
-    doc.text(`${bin.width}x${bin.length}`, x + 2, y + 6);
+    doc.text(`${size.width}x${size.length}`, x + 2, y + 6);
   });
 
   // Item list
@@ -44,9 +52,9 @@ export async function exportLayoutToPdf(
   doc.text('Items:', marginX, marginY + maxDrawHeight + 12);
   const rows = placements
     .map((p) => {
-      const bin = bins.find((b) => b.id === p.binId);
-      if (!bin) return null;
-      return `${bin.name} — ${bin.width}x${bin.length} at (${p.x}", ${p.y}")`;
+      const size = getPlacementSize(p);
+      if (!size) return null;
+      return `${size.name} — ${size.width}x${size.length} at (${p.x}", ${p.y}")`;
     })
     .filter(Boolean) as string[];
 

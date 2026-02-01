@@ -13,9 +13,8 @@ const getPlacements = async (page: import('@playwright/test').Page) =>
 test('drawer size inputs update canvas labels', async ({ page }) => {
   await page.goto('/');
 
-  const inputs = page.locator('input[type="number"]');
-  await inputs.nth(0).fill('30');
-  await inputs.nth(1).fill('20');
+  await page.getByTestId('drawer-width-input').fill('30');
+  await page.getByTestId('drawer-length-input').fill('20');
 
   await expect(page.getByText('30" Width')).toBeVisible();
   await expect(page.getByText('20" Length')).toBeVisible();

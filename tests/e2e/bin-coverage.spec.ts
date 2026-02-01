@@ -16,9 +16,8 @@ const getPlacements = async (page: import('@playwright/test').Page) =>
   });
 
 const setDrawerSize = async (page: import('@playwright/test').Page, width: number, length: number) => {
-  const inputs = page.locator('input[type="number"]');
-  await inputs.nth(0).fill(String(width));
-  await inputs.nth(1).fill(String(length));
+  await page.getByTestId('drawer-width-input').fill(String(width));
+  await page.getByTestId('drawer-length-input').fill(String(length));
 };
 
 const searchAndClickBin = async (page: import('@playwright/test').Page, query: string) => {
@@ -110,7 +109,7 @@ test('drag delta stays consistent at 1x scale', async ({ page }) => {
 test('drag delta is consistent with snap 1 and snap 0.5', async ({ page }) => {
   await page.goto('/');
 
-  const magnet = page.getByTitle(/Snap to/i);
+  const snapInput = page.getByLabel('Snap distance');
   await page.locator(BIN_CARD).first().click();
   const placed = page.locator(PLACED).first();
   await placed.waitFor({ state: 'visible' });
@@ -121,7 +120,7 @@ test('drag delta is consistent with snap 1 and snap 0.5', async ({ page }) => {
   const box = await placed.boundingBox();
   if (!box) throw new Error('Missing placed bin bounding box');
 
-  const deltaPx = { x: 50, y: 25 };
+  const deltaPx = { x: 38, y: 38 };
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
   await page.mouse.move(box.x + box.width / 2 + deltaPx.x, box.y + box.height / 2 + deltaPx.y, { steps: 10 });
@@ -129,16 +128,16 @@ test('drag delta is consistent with snap 1 and snap 0.5', async ({ page }) => {
 
   const mid = (await getPlacements(page)) as Placement[];
   const midPlacement = mid[0];
-  expect(midPlacement.x - beforePlacement.x).toBeCloseTo(deltaPx.x / 25, 1);
-  expect(midPlacement.y - beforePlacement.y).toBeCloseTo(deltaPx.y / 25, 1);
+  const expectedSnap1 = Math.round(deltaPx.x / 25);
+  expect(midPlacement.x - beforePlacement.x).toBeCloseTo(expectedSnap1, 1);
+  expect(midPlacement.y - beforePlacement.y).toBeCloseTo(expectedSnap1, 1);
 
-  // Toggle to 0.5" snap (currently no snapping applied; this ensures behavior remains consistent).
-  await magnet.click();
+  await snapInput.fill('0.5');
 
   const box2 = await placed.boundingBox();
   if (!box2) throw new Error('Missing placed bin bounding box');
 
-  const deltaPx2 = { x: 30, y: 40 };
+  const deltaPx2 = { x: 38, y: 38 };
   await page.mouse.move(box2.x + box2.width / 2, box2.y + box2.height / 2);
   await page.mouse.down();
   await page.mouse.move(box2.x + box2.width / 2 + deltaPx2.x, box2.y + box2.height / 2 + deltaPx2.y, { steps: 10 });
@@ -146,6 +145,7 @@ test('drag delta is consistent with snap 1 and snap 0.5', async ({ page }) => {
 
   const after = (await getPlacements(page)) as Placement[];
   const afterPlacement = after[0];
-  expect(afterPlacement.x - midPlacement.x).toBeCloseTo(deltaPx2.x / 25, 1);
-  expect(afterPlacement.y - midPlacement.y).toBeCloseTo(deltaPx2.y / 25, 1);
+  const expectedSnapHalf = Math.round((deltaPx2.x / 25) / 0.5) * 0.5;
+  expect(afterPlacement.x - midPlacement.x).toBeCloseTo(expectedSnapHalf, 1);
+  expect(afterPlacement.y - midPlacement.y).toBeCloseTo(expectedSnapHalf, 1);
 });

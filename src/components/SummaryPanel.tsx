@@ -27,8 +27,19 @@ export function SummaryPanel() {
   const placedWithMeta = useMemo(
     () =>
       placements
-        .map((p) => ({ placement: p, bin: bins.find((b) => b.id === p.binId) }))
-        .filter((item) => Boolean(item.bin)) as { placement: typeof placements[number]; bin: typeof bins[number] }[],
+        .map((p) => {
+          const bin = bins.find((b) => b.id === p.binId);
+          const width = p.width ?? bin?.width;
+          const length = p.length ?? bin?.length;
+          if (width == null || length == null) return null;
+          return { placement: p, bin, width, length };
+        })
+        .filter(Boolean) as {
+        placement: typeof placements[number];
+        bin: typeof bins[number] | undefined;
+        width: number;
+        length: number;
+      }[],
     [placements, bins]
   );
 
@@ -46,6 +57,8 @@ export function SummaryPanel() {
               type="number"
               min={6}
               step={0.25}
+              aria-label="Drawer width"
+              data-testid="drawer-width-input"
               value={drawerWidth}
               onChange={(e) => setDrawerSize(Number(e.target.value) || drawerWidth, drawerLength)}
               className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-[#0B0B0C] focus:outline-none focus:ring-2 focus:ring-[#14476B]/20"
@@ -57,6 +70,8 @@ export function SummaryPanel() {
               type="number"
               min={6}
               step={0.25}
+              aria-label="Drawer length"
+              data-testid="drawer-length-input"
               value={drawerLength}
               onChange={(e) => setDrawerSize(drawerWidth, Number(e.target.value) || drawerLength)}
               className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-[#0B0B0C] focus:outline-none focus:ring-2 focus:ring-[#14476B]/20"
@@ -87,17 +102,19 @@ export function SummaryPanel() {
           {placedWithMeta.length === 0 && (
             <p className="text-sm text-slate-400">No bins placed yet.</p>
           )}
-          {placedWithMeta.map(({ placement, bin }) => (
+          {placedWithMeta.map(({ placement, bin, width, length }) => (
             <div
               key={placement.id}
               className="flex items-center justify-between group py-2 border-b border-slate-50 last:border-0"
             >
               <div className="flex items-center gap-3">
                 <div className="h-8 w-8 bg-slate-100 border border-slate-200 text-[10px] text-slate-500 flex items-center justify-center">
-                  {bin.width}x{bin.length}
+                  {width}x{length}
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-[#0B0B0C]">{bin.name}</p>
+                  <p className="text-sm font-medium text-[#0B0B0C]">
+                    {placement.label?.trim() || bin?.name || 'Custom Bin'}
+                  </p>
                 </div>
               </div>
               <button

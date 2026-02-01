@@ -9,6 +9,7 @@ function Harness() {
     placements,
     addPlacement,
     movePlacement,
+    updatePlacement,
     undo,
     redo,
     canUndo,
@@ -113,11 +114,64 @@ function Harness() {
       </button>
       <button
         onClick={() => {
-          const result = suggestLayout();
+          if (placements[0]) {
+            updatePlacement(placements[0].id, { label: 'Top bin' });
+          }
+        }}
+      >
+        label-first
+      </button>
+      <button
+        onClick={() => {
+          if (placements[0]) {
+            updatePlacement(placements[0].id, { color: '#ff0000' });
+          }
+        }}
+      >
+        color-first
+      </button>
+      <button
+        onClick={() => {
+          if (placements[0]) {
+            updatePlacement(placements[0].id, { width: 4 });
+          }
+        }}
+      >
+        resize-first-width
+      </button>
+      <button
+        onClick={() => {
+          if (placements[0]) {
+            updatePlacement(placements[0].id, { width: 8 });
+          }
+        }}
+      >
+        resize-first-width-8
+      </button>
+      <button
+        onClick={() => {
+          if (placements[0]) {
+            updatePlacement(placements[0].id, { length: 4 });
+          }
+        }}
+      >
+        resize-first-length
+      </button>
+      <button
+        onClick={() => {
+          const result = suggestLayout('pack');
           setLastSuggest(result);
         }}
       >
         suggest-layout
+      </button>
+      <button
+        onClick={() => {
+          const result = suggestLayout('random');
+          setLastSuggest(result);
+        }}
+      >
+        suggest-layout-random
       </button>
       <button onClick={undo}>undo</button>
       <button onClick={redo}>redo</button>
@@ -478,6 +532,47 @@ describe('LayoutProvider', () => {
     expect(screen.getByTestId('count').textContent).toBe('1');
   });
 
+  it('updatePlacement updates label and color', () => {
+    render(
+      <LayoutProvider>
+        <Harness />
+      </LayoutProvider>
+    );
+    fireEvent.click(screen.getByText('add'));
+    fireEvent.click(screen.getByText('label-first'));
+    fireEvent.click(screen.getByText('color-first'));
+    const placements = JSON.parse(screen.getByTestId('placements').textContent ?? '[]') as { label?: string; color?: string }[];
+    expect(placements[0]?.label).toBe('Top bin');
+    expect(placements[0]?.color).toBe('#ff0000');
+  });
+
+  it('updatePlacement resizes bins', () => {
+    render(
+      <LayoutProvider>
+        <Harness />
+      </LayoutProvider>
+    );
+    fireEvent.click(screen.getByText('add'));
+    fireEvent.click(screen.getByText('resize-first-width'));
+    fireEvent.click(screen.getByText('resize-first-length'));
+    const placements = JSON.parse(screen.getByTestId('placements').textContent ?? '[]') as { width?: number; length?: number }[];
+    expect(placements[0]?.width).toBe(4);
+    expect(placements[0]?.length).toBe(4);
+  });
+
+  it('updatePlacement blocks oversized bins', () => {
+    render(
+      <LayoutProvider>
+        <Harness />
+      </LayoutProvider>
+    );
+    fireEvent.click(screen.getByText('resize-4x4'));
+    fireEvent.click(screen.getByText('add'));
+    fireEvent.click(screen.getByText('resize-first-width-8'));
+    const placements = JSON.parse(screen.getByTestId('placements').textContent ?? '[]') as { width?: number }[];
+    expect(placements[0]?.width).toBe(2);
+  });
+
   it('suggestLayout no-ops on empty layouts', () => {
     render(
       <LayoutProvider>
@@ -502,6 +597,18 @@ describe('LayoutProvider', () => {
     const placements = JSON.parse(screen.getByTestId('placements').textContent ?? '[]') as { x: number; y: number }[];
     const unique = new Set(placements.map((p) => `${p.x},${p.y}`));
     expect(unique.size).toBe(placements.length);
+  });
+
+  it('suggestLayout random mode applies a new layout', () => {
+    render(
+      <LayoutProvider>
+        <Harness />
+      </LayoutProvider>
+    );
+    fireEvent.click(screen.getByText('add'));
+    fireEvent.click(screen.getByText('suggest-layout-random'));
+    expect(screen.getByTestId('last-suggest').textContent).toBe('applied');
+    expect(Number(screen.getByTestId('last-suggest-moved').textContent)).toBeGreaterThanOrEqual(0);
   });
 
   it('suggestLayout blocks when bins cannot fit', () => {
