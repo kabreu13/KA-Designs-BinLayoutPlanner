@@ -80,7 +80,7 @@ export function BinCatalog() {
               <div key={bucket}>
                 <div className="flex items-center justify-between pr-1 mb-1">
                   <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider pl-1">
-                    Length {bucket}"{bucket === 8 ? '+' : ''} ({grouped[bucket].length})
+                    Length {bucket}"{bucket === 8 ? '+' : ''}
                   </h3>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -124,7 +124,7 @@ function DraggableBinCard({ bin, onClick }: { bin: ReturnType<typeof useLayout>[
     >
       <div className="p-4 flex items-center justify-center">
         <div
-          className="relative flex items-center justify-center"
+          className="relative flex items-center justify-center p-2"
           style={{ width: `${previewFrame}px`, height: `${previewFrame}px` }}
         >
           <div
@@ -136,10 +136,10 @@ function DraggableBinCard({ bin, onClick }: { bin: ReturnType<typeof useLayout>[
               minHeight: '40px'
             }}
           />
-          <span className="absolute -bottom-5 left-1/2 -translate-x-1/2 text-[11px] text-slate-700 font-mono">
+          <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 text-[10px] text-slate-700 font-mono">
             {bin.width}"
           </span>
-          <span className="absolute -left-6 top-1/2 -translate-y-1/2 text-[11px] text-slate-700 font-mono">
+          <span className="absolute left-0.5 top-1/2 -translate-y-1/2 text-[10px] text-slate-700 font-mono">
             {bin.length}"
           </span>
         </div>

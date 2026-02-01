@@ -306,40 +306,8 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
         result = { status: 'blocked' };
         return null;
       }
-      if (size.width > state.drawerWidth || size.length > state.drawerLength) {
-        result = { status: 'blocked' };
-        return null;
-      }
-      const { x: safeX, y: safeY } = clampPosition(
-        placement.x,
-        placement.y,
-        size,
-        state.drawerWidth,
-        state.drawerLength
-      );
 
-      let status: PlacementResultStatus = 'placed';
-      let target = { x: safeX, y: safeY };
-      const others = state.placements.filter((p) => p.id !== placementId);
-      if (hasCollision(size, target.x, target.y, others, BINS)) {
-        const suggestion = findFirstFit(
-          size,
-          target.x,
-          target.y,
-          others,
-          BINS,
-          state.drawerWidth,
-          state.drawerLength
-        );
-        if (!suggestion) {
-          result = { status: 'blocked' };
-          return null;
-        }
-        target = suggestion;
-        status = 'autofit';
-      }
-
-      result = { status, position: target };
+      result = { status: 'placed', position: { x: placement.x, y: placement.y } };
       return {
         ...state,
         placements: state.placements.map((p) =>
@@ -349,8 +317,8 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
                 ...updates,
                 width: nextWidth,
                 length: nextLength,
-                x: target.x,
-                y: target.y
+                x: placement.x,
+                y: placement.y
               }
             : p
         )
@@ -367,77 +335,68 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
     }
 
     const originalById = new Map(state.placements.map((p) => [p.id, p]));
+    const packPlacements = (ordered: Placement[]) => {
+      const nextPlacements: Placement[] = [];
+      let moved = 0;
+      let cursorX = 0;
+      let cursorY = 0;
+      let rowHeight = 0;
+
+      for (const placement of ordered) {
+        const currentSize = getPlacementSize(placement);
+        if (!currentSize) return { status: 'blocked' as const, moved, placements: nextPlacements };
+        if (currentSize.width > state.drawerWidth || currentSize.length > state.drawerLength) {
+          return { status: 'blocked' as const, moved, placements: nextPlacements };
+        }
+
+        if (cursorX + currentSize.width > state.drawerWidth) {
+          cursorX = 0;
+          cursorY += rowHeight;
+          rowHeight = 0;
+        }
+
+        if (cursorY + currentSize.length > state.drawerLength) {
+          return { status: 'blocked' as const, moved, placements: nextPlacements };
+        }
+
+        const target = { x: cursorX, y: cursorY };
+        cursorX += currentSize.width;
+        rowHeight = Math.max(rowHeight, currentSize.length);
+
+        const original = originalById.get(placement.id);
+        if (!original || target.x !== original.x || target.y !== original.y) {
+          moved += 1;
+        }
+        nextPlacements.push({ ...placement, x: target.x, y: target.y });
+      }
+
+      return { status: 'applied' as const, moved, placements: nextPlacements };
+    };
+
     const ordered =
       mode === 'random'
         ? [...state.placements].sort(() => Math.random() - 0.5)
-        : [...state.placements];
+        : [...state.placements].sort((a, b) => {
+            const sizeA = getPlacementSize(a);
+            const sizeB = getPlacementSize(b);
+            const areaA = sizeA ? sizeA.width * sizeA.length : 0;
+            const areaB = sizeB ? sizeB.width * sizeB.length : 0;
+            return areaB - areaA;
+          });
 
-    const nextPlacements: Placement[] = [];
-    let moved = 0;
-
-    for (const placement of ordered) {
-      const currentSize = getPlacementSize(placement);
-      if (!currentSize) return { status: 'blocked', moved };
-      if (currentSize.width > state.drawerWidth || currentSize.length > state.drawerLength) {
-        return { status: 'blocked', moved };
-      }
-
-      const maxX = Math.max(0, state.drawerWidth - currentSize.width);
-      const maxY = Math.max(0, state.drawerLength - currentSize.length);
-      const startX =
-        mode === 'random' ? Math.round(Math.random() * maxX) : 0;
-      const startY =
-        mode === 'random' ? Math.round(Math.random() * maxY) : 0;
-      const { x: safeX, y: safeY } = clampPosition(
-        startX,
-        startY,
-        currentSize,
-        state.drawerWidth,
-        state.drawerLength
-      );
-
-      let target = { x: safeX, y: safeY };
-      if (hasCollision(currentSize, target.x, target.y, nextPlacements, BINS)) {
-        let suggestion = findFirstFit(
-          currentSize,
-          target.x,
-          target.y,
-          nextPlacements,
-          BINS,
-          state.drawerWidth,
-          state.drawerLength
-        );
-        if (!suggestion && mode === 'random') {
-          suggestion = findFirstFit(
-            currentSize,
-            0,
-            0,
-            nextPlacements,
-            BINS,
-            state.drawerWidth,
-            state.drawerLength
-          );
-        }
-        if (!suggestion) return { status: 'blocked', moved };
-        target = suggestion;
-      }
-
-      const original = originalById.get(placement.id);
-      if (!original || target.x !== original.x || target.y !== original.y) {
-        moved += 1;
-      }
-
-      nextPlacements.push({ ...placement, x: target.x, y: target.y });
+    const packed = packPlacements(ordered);
+    if (packed.status === 'blocked') {
+      return { status: 'blocked', moved: packed.moved };
     }
 
-    if (moved > 0) {
+    if (packed.moved > 0) {
       pushState({
         ...state,
-        placements: nextPlacements
+        placements: packed.placements
       });
     }
 
-    return { status: 'applied', moved };
+    return { status: 'applied', moved: packed.moved };
   };
 
   const removePlacement = (placementId: string) => {

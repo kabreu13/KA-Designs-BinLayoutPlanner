@@ -28,6 +28,12 @@ describe('layoutMath basics', () => {
     expect(hasCollision(bin2x2, 0, 0, placements, [bin2x2])).toBe(true);
   });
 
+  it('hasCollision respects placement size overrides', () => {
+    const placements: Placement[] = [{ id: 'p1', binId: 'b1', x: 0, y: 0, width: 4, length: 4 }];
+    expect(hasCollision(bin2x2, 3, 3, placements, [bin2x2, bin4x4])).toBe(true);
+    expect(hasCollision(bin2x2, 4, 4, placements, [bin2x2, bin4x4])).toBe(false);
+  });
+
   it('hasFractionalPlacements detects fractional inputs', () => {
     const placements: Placement[] = [{ id: 'p1', binId: 'b1', x: 0.5, y: 0 }];
     expect(hasFractionalPlacements([], 0, 0)).toBe(false);

@@ -24,24 +24,86 @@ export function SummaryPanel() {
     return () => window.clearTimeout(id);
   }, [status]);
 
-  const placedWithMeta = useMemo(
-    () =>
-      placements
-        .map((p) => {
-          const bin = bins.find((b) => b.id === p.binId);
-          const width = p.width ?? bin?.width;
-          const length = p.length ?? bin?.length;
-          if (width == null || length == null) return null;
-          return { placement: p, bin, width, length };
-        })
-        .filter(Boolean) as {
-        placement: typeof placements[number];
+  const placementGroups = useMemo(() => {
+    const groups = new Map<
+      string,
+      {
+        placements: typeof placements;
         bin: typeof bins[number] | undefined;
         width: number;
         length: number;
-      }[],
-    [placements, bins]
-  );
+        label: string;
+        color: string | undefined;
+      }
+    >();
+
+    placements.forEach((placement) => {
+      const bin = bins.find((b) => b.id === placement.binId);
+      const width = placement.width ?? bin?.width;
+      const length = placement.length ?? bin?.length;
+      if (width == null || length == null) return;
+      const label = placement.label?.trim() || bin?.name || 'Custom Bin';
+      const color = placement.color;
+      const key = `${placement.binId}-${width}x${length}-${label}-${color ?? 'none'}`;
+      const existing = groups.get(key);
+      if (existing) {
+        existing.placements.push(placement);
+      } else {
+        groups.set(key, {
+          placements: [placement],
+          bin,
+          width,
+          length,
+          label,
+          color
+        });
+      }
+    });
+
+    return Array.from(groups.values()).sort((a, b) => b.placements.length - a.placements.length);
+  }, [placements, bins]);
+
+  const invalidCount = useMemo(() => {
+    const invalid = new Set<string>();
+    const sized = placements
+      .map((placement) => {
+        const bin = bins.find((b) => b.id === placement.binId);
+        const width = placement.width ?? bin?.width;
+        const length = placement.length ?? bin?.length;
+        if (width == null || length == null) return null;
+        return { placement, width, length };
+      })
+      .filter(Boolean) as Array<{ placement: typeof placements[number]; width: number; length: number }>;
+
+    sized.forEach(({ placement, width, length }) => {
+      if (
+        placement.x < 0 ||
+        placement.y < 0 ||
+        placement.x + width > drawerWidth ||
+        placement.y + length > drawerLength
+      ) {
+        invalid.add(placement.id);
+      }
+    });
+
+    for (let i = 0; i < sized.length; i += 1) {
+      for (let j = i + 1; j < sized.length; j += 1) {
+        const a = sized[i];
+        const b = sized[j];
+        const overlap =
+          a.placement.x < b.placement.x + b.width &&
+          a.placement.x + a.width > b.placement.x &&
+          a.placement.y < b.placement.y + b.length &&
+          a.placement.y + a.length > b.placement.y;
+        if (overlap) {
+          invalid.add(a.placement.id);
+          invalid.add(b.placement.id);
+        }
+      }
+    }
+
+    return invalid.size;
+  }, [placements, bins, drawerWidth, drawerLength]);
 
   return (
     <div className="w-[320px] bg-white border-l border-slate-900/[0.06] flex flex-col h-full">
@@ -89,7 +151,17 @@ export function SummaryPanel() {
           </div>
           <p className="text-xs text-slate-400 flex items-center gap-1 mt-2">
             <AlertCircle className="h-3 w-3" />
-            {placedWithMeta.length} bins placed · Drawer area {drawerArea.toFixed(0)} in²
+            {placements.length} bins placed · Drawer area {drawerArea.toFixed(0)} in²
+          </p>
+          <p
+            className={`text-xs flex items-center gap-1 ${
+              invalidCount === 0 ? 'text-emerald-600' : 'text-amber-600'
+            }`}
+          >
+            <AlertCircle className="h-3 w-3" />
+            {invalidCount === 0
+              ? 'All bins safely placed.'
+              : `${invalidCount} bin${invalidCount === 1 ? '' : 's'} need attention.`}
           </p>
         </div>
       </div>
@@ -99,27 +171,33 @@ export function SummaryPanel() {
           Placed Items
         </h3>
         <div className="space-y-3">
-          {placedWithMeta.length === 0 && (
+          {placementGroups.length === 0 && (
             <p className="text-sm text-slate-400">No bins placed yet.</p>
           )}
-          {placedWithMeta.map(({ placement, bin, width, length }) => (
+          {placementGroups.map((group) => (
             <div
-              key={placement.id}
+              key={`${group.label}-${group.width}-${group.length}-${group.color ?? 'none'}`}
               className="flex items-center justify-between group py-2 border-b border-slate-50 last:border-0"
             >
               <div className="flex items-center gap-3">
-                <div className="h-8 w-8 bg-slate-100 border border-slate-200 text-[10px] text-slate-500 flex items-center justify-center">
-                  {width}x{length}
+                <div
+                  className="h-10 w-10 border border-slate-200 text-[10px] text-slate-500 flex items-center justify-center rounded-md"
+                  style={{ backgroundColor: group.color ?? '#f1f5f9' }}
+                >
+                  {group.width}x{group.length}
                 </div>
                 <div>
                   <p className="text-sm font-medium text-[#0B0B0C]">
-                    {placement.label?.trim() || bin?.name || 'Custom Bin'}
+                    {group.label}
                   </p>
+                  {group.placements.length > 1 && (
+                    <p className="text-[11px] text-slate-400">x {group.placements.length} of them</p>
+                  )}
                 </div>
               </div>
               <button
                 className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
-                onClick={() => removePlacement(placement.id)}
+                onClick={() => removePlacement(group.placements[0].id)}
               >
                 <Trash2 className="h-4 w-4" />
               </button>

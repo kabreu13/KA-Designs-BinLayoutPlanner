@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { useDndMonitor, useDroppable, useDraggable } from '@dnd-kit/core';
 import { Button } from './ui/Button';
@@ -70,7 +70,7 @@ export function Canvas() {
     if (!placement) return;
     setLabelDraft(placement.label ?? '');
     setColorDraft(placement.color ?? '#ffffff');
-  }, [editor?.id, placements]);
+  }, [editor, placements]);
 
   useEffect(() => {
     if (!editor) return;
@@ -146,14 +146,22 @@ export function Canvas() {
   const clampSnap = (value: number) => Math.max(0.5, Math.min(2, value));
   const snapValue = clampSnap(snap);
   const applySnap = (value: number) => Math.round(value / snapValue) * snapValue;
-
-  const getPlacementSize = (placement: Placement) => {
-    const bin = bins.find((b) => b.id === placement.binId);
-    const width = placement.width ?? bin?.width;
-    const length = placement.length ?? bin?.length;
-    if (width == null || length == null) return null;
-    return { width, length, bin };
+  const snapToBounds = (value: number, max: number) => {
+    if (value <= snapValue) return 0;
+    if (max - value <= snapValue) return max;
+    return applySnap(value);
   };
+
+  const getPlacementSize = useCallback(
+    (placement: Placement) => {
+      const bin = bins.find((b) => b.id === placement.binId);
+      const width = placement.width ?? bin?.width;
+      const length = placement.length ?? bin?.length;
+      if (width == null || length == null) return null;
+      return { width, length, bin };
+    },
+    [bins]
+  );
 
   const attachDropAreaRef = (node: HTMLDivElement | null) => {
     dropAreaRef.current = node;
@@ -162,6 +170,46 @@ export function Canvas() {
 
   const selectedPlacement = editor ? placements.find((p) => p.id === editor.id) : null;
   const selectedSize = selectedPlacement ? getPlacementSize(selectedPlacement) : null;
+
+  const invalidPlacementIds = useMemo(() => {
+    const invalid = new Set<string>();
+    const sizedPlacements = placements
+      .map((placement) => {
+        const size = getPlacementSize(placement);
+        if (!size) return null;
+        return { placement, size };
+      })
+      .filter(Boolean) as Array<{ placement: Placement; size: { width: number; length: number } }>;
+
+    sizedPlacements.forEach(({ placement, size }) => {
+      if (
+        placement.x < 0 ||
+        placement.y < 0 ||
+        placement.x + size.width > drawerWidth ||
+        placement.y + size.length > drawerLength
+      ) {
+        invalid.add(placement.id);
+      }
+    });
+
+    for (let i = 0; i < sizedPlacements.length; i += 1) {
+      const a = sizedPlacements[i];
+      for (let j = i + 1; j < sizedPlacements.length; j += 1) {
+        const b = sizedPlacements[j];
+        const overlap =
+          a.placement.x < b.placement.x + b.size.width &&
+          a.placement.x + a.size.width > b.placement.x &&
+          a.placement.y < b.placement.y + b.size.length &&
+          a.placement.y + a.size.length > b.placement.y;
+        if (overlap) {
+          invalid.add(a.placement.id);
+          invalid.add(b.placement.id);
+        }
+      }
+    }
+
+    return invalid;
+  }, [placements, drawerWidth, drawerLength, getPlacementSize]);
 
   const isTouchEvent = (e: Event): e is TouchEvent =>
     typeof TouchEvent !== 'undefined' && (e instanceof TouchEvent || 'touches' in e || 'changedTouches' in e);
@@ -198,10 +246,10 @@ export function Canvas() {
             return getPlacementSize(placement);
           })();
     if (!size) return null;
-    const snappedX = applySnap(rawX);
-    const snappedY = applySnap(rawY);
     const maxX = Math.max(0, drawerWidth - size.width);
     const maxY = Math.max(0, drawerLength - size.length);
+    const snappedX = snapToBounds(rawX, maxX);
+    const snappedY = snapToBounds(rawY, maxY);
     const isOutOfBounds = snappedX < 0 || snappedY < 0 || snappedX > maxX || snappedY > maxY;
     const x = Math.max(0, Math.min(snappedX, maxX));
     const y = Math.max(0, Math.min(snappedY, maxY));
@@ -216,10 +264,10 @@ export function Canvas() {
     if (!size) return null;
     const rawX = originPlacementRef.current.x + delta.x / gridSize;
     const rawY = originPlacementRef.current.y + delta.y / gridSize;
-    const snappedX = applySnap(rawX);
-    const snappedY = applySnap(rawY);
     const maxX = Math.max(0, drawerWidth - size.width);
     const maxY = Math.max(0, drawerLength - size.length);
+    const snappedX = snapToBounds(rawX, maxX);
+    const snappedY = snapToBounds(rawY, maxY);
     const isOutOfBounds = snappedX < 0 || snappedY < 0 || snappedX > maxX || snappedY > maxY;
     const x = Math.max(0, Math.min(snappedX, maxX));
     const y = Math.max(0, Math.min(snappedY, maxY));
@@ -437,6 +485,7 @@ export function Canvas() {
                   size={size}
                   gridSize={gridSize}
                   dragStatus={dragStatus}
+                  isInvalid={invalidPlacementIds.has(placement.id)}
                   onClick={(event) => {
                     event.stopPropagation();
                     setEditor({ id: placement.id, x: event.clientX, y: event.clientY });
@@ -644,13 +693,15 @@ function DraggablePlacement({
   size,
   gridSize,
   dragStatus,
-  onClick
+  onClick,
+  isInvalid
 }: {
   placement: Placement;
   size: { width: number; length: number; bin?: Bin };
   gridSize: number;
   dragStatus: { placementId: string; fits: boolean } | null;
   onClick: (event: ReactMouseEvent<HTMLDivElement>) => void;
+  isInvalid: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `placement-${placement.id}`,
@@ -658,7 +709,13 @@ function DraggablePlacement({
   });
 
   const isActive = isDragging && dragStatus?.placementId === placement.id;
-  const borderColor = isActive ? (dragStatus?.fits ? '#16a34a' : '#dc2626') : undefined;
+  const borderColor = isInvalid
+    ? '#dc2626'
+    : isActive
+      ? dragStatus?.fits
+        ? '#16a34a'
+        : '#dc2626'
+      : undefined;
 
   const translate = transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined;
 

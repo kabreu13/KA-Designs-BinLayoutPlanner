@@ -36,6 +36,51 @@ test('space used bar increases with placements', async ({ page }) => {
   await expect(page.getByText(/bins placed/)).toBeVisible();
 });
 
+test('status shows when bins need attention', async ({ page }) => {
+  const state = {
+    drawerWidth: 4,
+    drawerLength: 4,
+    placements: [
+      { id: 'p1', binId: 'bin-2x2', x: 0, y: 0 },
+      { id: 'p2', binId: 'bin-2x2', x: 0, y: 0 }
+    ],
+    usage: { 'bin-2x2': 2 }
+  };
+  await page.addInitScript((layout) => {
+    localStorage.setItem('bin-layout-state', JSON.stringify(layout));
+  }, state);
+  await page.goto('/');
+  await expect(page.getByText(/need attention/)).toBeVisible();
+});
+
+test('status shows when bins are safely placed', async ({ page }) => {
+  const state = {
+    drawerWidth: 6,
+    drawerLength: 4,
+    placements: [
+      { id: 'p1', binId: 'bin-2x2', x: 0, y: 0 },
+      { id: 'p2', binId: 'bin-2x2', x: 2, y: 0 }
+    ],
+    usage: { 'bin-2x2': 2 }
+  };
+  await page.addInitScript((layout) => {
+    localStorage.setItem('bin-layout-state', JSON.stringify(layout));
+  }, state);
+  await page.goto('/');
+  await expect(page.getByText('All bins safely placed.')).toBeVisible();
+});
+
+test('summary groups identical bins with a count', async ({ page }) => {
+  await page.goto('/');
+
+  const binCard = page.locator(BIN_CARD).first();
+  await binCard.waitFor({ state: 'visible' });
+  await binCard.click();
+  await binCard.click();
+
+  await expect(page.getByText(/x 2 of them/)).toBeVisible();
+});
+
 test('remove bin from summary updates placements', async ({ page }) => {
   await page.goto('/');
 

@@ -149,3 +149,39 @@ test('drag delta is consistent with snap 1 and snap 0.5', async ({ page }) => {
   expect(afterPlacement.x - midPlacement.x).toBeCloseTo(expectedSnapHalf, 1);
   expect(afterPlacement.y - midPlacement.y).toBeCloseTo(expectedSnapHalf, 1);
 });
+
+test('snap pulls bins to drawer borders', async ({ page }) => {
+  await page.goto('/');
+
+  await setDrawerSize(page, 6, 6);
+  const snapInput = page.getByLabel('Snap distance');
+  await snapInput.fill('2');
+
+  await page.locator(BIN_CARD).first().click();
+  const placed = page.locator(PLACED).first();
+  await placed.waitFor({ state: 'visible' });
+
+  const box = await placed.boundingBox();
+  if (!box) throw new Error('Missing placed bin bounding box');
+
+  // Move to x=1 inch (25px); should snap back to 0.
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 25, box.y + box.height / 2, { steps: 10 });
+  await page.mouse.up();
+
+  const after = (await getPlacements(page)) as Placement[];
+  expect(after[0]?.x).toBeCloseTo(0, 1);
+
+  const box2 = await placed.boundingBox();
+  if (!box2) throw new Error('Missing placed bin bounding box');
+  // Move near the right/bottom edges; should snap to max bounds.
+  await page.mouse.move(box2.x + box2.width / 2, box2.y + box2.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box2.x + box2.width / 2 + 75, box2.y + box2.height / 2 + 75, { steps: 10 });
+  await page.mouse.up();
+
+  const end = (await getPlacements(page)) as Placement[];
+  expect(end[0]?.x).toBeCloseTo(4, 1);
+  expect(end[0]?.y).toBeCloseTo(4, 1);
+});

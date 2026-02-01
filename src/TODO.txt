@@ -1,9 +1,10 @@
-1. [DONE] Clicking on a bin opens an edit popup near the mouse with label, color, and size controls (±2", 2–8").
-2. [DONE] Suggest layout: first click packs bins, subsequent clicks randomize.
-3. [DONE] Bin Catalog preview centered in the card.
-4. [DONE] Snap now affects placement movement and is adjustable by the user.
+All items complete.
 
-Notes:
-- Added placement editor UI, label/color persistence, and size-aware collisions.
-- Updated PDF export and summary to reflect custom sizes and labels.
-- Added/updated unit + e2e coverage (including placement editor).
+DONE:
+- Bins should be able to snap to the borders.
+- A suggested layout should have all the bins connected.
+- users should be able to resize bins even even if they go out of bounds or cross into other bins. just give those a red border.
+- Add something to notify the user when all bins are safely placed or not. add it under space used.
+- Edit the Placed items so when there's more than 1 of an item show the mini preview and then "x number of them"
+- The side measurments for the mini priviews shouldn't go outside the item card, and give some white space. the size number should be a little closer to the side.
+- Remove the amount of bin for a given length in bin catalog.

@@ -4,6 +4,34 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { LayoutProvider, useLayout } from '../src/context/LayoutContext';
 
+const arePlacementsConnected = (nodes: Array<{ x: number; y: number; width: number; length: number }>) => {
+  if (nodes.length === 0) return true;
+  const adjacent = (a: typeof nodes[number], b: typeof nodes[number]) => {
+    const aRight = a.x + a.width;
+    const aBottom = a.y + a.length;
+    const bRight = b.x + b.width;
+    const bBottom = b.y + b.length;
+    const horizontalTouch = (aRight === b.x || bRight === a.x) && a.y < bBottom && aBottom > b.y;
+    const verticalTouch = (aBottom === b.y || bBottom === a.y) && a.x < bRight && aRight > b.x;
+    return horizontalTouch || verticalTouch;
+  };
+
+  const visited = new Set<number>();
+  const stack = [0];
+  while (stack.length > 0) {
+    const index = stack.pop() ?? 0;
+    if (visited.has(index)) continue;
+    visited.add(index);
+    nodes.forEach((node, j) => {
+      if (!visited.has(j) && adjacent(nodes[index], node)) {
+        stack.push(j);
+      }
+    });
+  }
+
+  return visited.size === nodes.length;
+};
+
 function Harness() {
   const {
     placements,
@@ -151,6 +179,15 @@ function Harness() {
       <button
         onClick={() => {
           if (placements[0]) {
+            updatePlacement(placements[0].id, { width: 10 });
+          }
+        }}
+      >
+        resize-first-width-10
+      </button>
+      <button
+        onClick={() => {
+          if (placements[0]) {
             updatePlacement(placements[0].id, { length: 4 });
           }
         }}
@@ -267,6 +304,22 @@ function Harness() {
         }
       >
         import-out-of-bounds
+      </button>
+      <button
+        onClick={() =>
+          importState({
+            drawerWidth: 8,
+            drawerLength: 8,
+            placements: [
+              { id: 'p1', binId: 'bin-2x2', x: 0, y: 0 },
+              { id: 'p2', binId: 'bin-2x2', x: 6, y: 0 },
+              { id: 'p3', binId: 'bin-2x2', x: 0, y: 6 }
+            ],
+            usage: { 'bin-2x2': 3 }
+          })
+        }
+      >
+        import-separated
       </button>
     </div>
   );
@@ -560,7 +613,7 @@ describe('LayoutProvider', () => {
     expect(placements[0]?.length).toBe(4);
   });
 
-  it('updatePlacement blocks oversized bins', () => {
+  it('updatePlacement allows out-of-bounds sizes up to 8', () => {
     render(
       <LayoutProvider>
         <Harness />
@@ -569,6 +622,18 @@ describe('LayoutProvider', () => {
     fireEvent.click(screen.getByText('resize-4x4'));
     fireEvent.click(screen.getByText('add'));
     fireEvent.click(screen.getByText('resize-first-width-8'));
+    const placements = JSON.parse(screen.getByTestId('placements').textContent ?? '[]') as { width?: number }[];
+    expect(placements[0]?.width).toBe(8);
+  });
+
+  it('updatePlacement blocks sizes outside the allowed range', () => {
+    render(
+      <LayoutProvider>
+        <Harness />
+      </LayoutProvider>
+    );
+    fireEvent.click(screen.getByText('add'));
+    fireEvent.click(screen.getByText('resize-first-width-10'));
     const placements = JSON.parse(screen.getByTestId('placements').textContent ?? '[]') as { width?: number }[];
     expect(placements[0]?.width).toBe(2);
   });
@@ -599,16 +664,31 @@ describe('LayoutProvider', () => {
     expect(unique.size).toBe(placements.length);
   });
 
-  it('suggestLayout random mode applies a new layout', () => {
+  it('suggestLayout pack keeps bins connected', () => {
     render(
       <LayoutProvider>
         <Harness />
       </LayoutProvider>
     );
-    fireEvent.click(screen.getByText('add'));
+    fireEvent.click(screen.getByText('import-separated'));
+    fireEvent.click(screen.getByText('suggest-layout'));
+    const placements = JSON.parse(screen.getByTestId('placements').textContent ?? '[]') as { x: number; y: number }[];
+    const nodes = placements.map((placement) => ({ x: placement.x, y: placement.y, width: 2, length: 2 }));
+    expect(arePlacementsConnected(nodes)).toBe(true);
+  });
+
+  it('suggestLayout random mode keeps bins connected', () => {
+    render(
+      <LayoutProvider>
+        <Harness />
+      </LayoutProvider>
+    );
+    fireEvent.click(screen.getByText('import-separated'));
     fireEvent.click(screen.getByText('suggest-layout-random'));
     expect(screen.getByTestId('last-suggest').textContent).toBe('applied');
-    expect(Number(screen.getByTestId('last-suggest-moved').textContent)).toBeGreaterThanOrEqual(0);
+    const placements = JSON.parse(screen.getByTestId('placements').textContent ?? '[]') as { x: number; y: number }[];
+    const nodes = placements.map((placement) => ({ x: placement.x, y: placement.y, width: 2, length: 2 }));
+    expect(arePlacementsConnected(nodes)).toBe(true);
   });
 
   it('suggestLayout blocks when bins cannot fit', () => {
@@ -630,8 +710,8 @@ describe('LayoutProvider', () => {
     env.MODE = 'development';
     env.DEV = true;
 
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
     localStorage.setItem('bin-layout-state', '{bad json');
     const encoded = encodeURIComponent(
