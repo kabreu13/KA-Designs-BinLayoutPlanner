@@ -40,7 +40,7 @@ export function BinCatalog() {
       {/* Search Header */}
       <div className="p-4 border-b border-slate-900/[0.06] space-y-4">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Bin Catalog</h2>
-        <p className="text-[10px] text-slate-500">Click or drag to place</p>
+        <p className="text-xs text-slate-500">Click or drag to place</p>
         <Input
           placeholder="Search sizes..."
           icon={<Search className="h-4 w-4" />}
@@ -98,10 +98,14 @@ export function BinCatalog() {
 
 function DraggableBinCard({ bin, onClick }: { bin: ReturnType<typeof useLayout>['bins'][number]; onClick: () => void }) {
   const maxPreview = 80;
-  const previewFrame = maxPreview + 16;
+  const previewFrame = maxPreview + 24;
   const scale = maxPreview / Math.max(bin.width, bin.length);
-  const previewWidth = bin.width * scale;
-  const previewHeight = bin.length * scale;
+  const previewWidth = Math.max(bin.width * scale, 40);
+  const previewHeight = Math.max(bin.length * scale, 40);
+  const boxLeft = (previewFrame - previewWidth) / 2;
+  const boxTop = (previewFrame - previewHeight) / 2;
+  const labelOffset = 10;
+  const labelOffsetLeft = labelOffset;
 
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `bin-${bin.id}`,
@@ -128,7 +132,7 @@ function DraggableBinCard({ bin, onClick }: { bin: ReturnType<typeof useLayout>[
           style={{ width: `${previewFrame}px`, height: `${previewFrame}px` }}
         >
           <div
-            className="bg-slate-100 border border-slate-200"
+            className="relative bg-slate-100 border border-slate-200"
             style={{
               width: `${previewWidth}px`,
               height: `${previewHeight}px`,
@@ -136,10 +140,24 @@ function DraggableBinCard({ bin, onClick }: { bin: ReturnType<typeof useLayout>[
               minHeight: '40px'
             }}
           />
-          <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 text-[10px] text-slate-700 font-mono">
+          <span
+            className="absolute text-xs text-slate-700 font-mono"
+            style={{
+              left: `${boxLeft + previewWidth / 2}px`,
+              top: `${boxTop + previewHeight + labelOffset}px`,
+              transform: 'translateX(-50%)'
+            }}
+          >
             {bin.width}"
           </span>
-          <span className="absolute left-0.5 top-1/2 -translate-y-1/2 text-[10px] text-slate-700 font-mono">
+          <span
+            className="absolute text-xs text-slate-700 font-mono"
+            style={{
+              left: `${boxLeft - labelOffsetLeft}px`,
+              top: `${boxTop + previewHeight / 2}px`,
+              transform: 'translate(-100%, -50%)'
+            }}
+          >
             {bin.length}"
           </span>
         </div>

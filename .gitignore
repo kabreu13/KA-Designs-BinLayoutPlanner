@@ -15,6 +15,7 @@ coverage
 coverage-e2e
 test-results
 tests
+*.spec.ts
 playwright-report
 .nyc_output
 

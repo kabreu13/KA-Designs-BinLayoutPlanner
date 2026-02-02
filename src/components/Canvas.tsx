@@ -12,6 +12,8 @@ const FRAME_THROTTLE_MS = 16; // ~60fps
 const SIZE_STEP = 2;
 const MIN_BIN_SIZE = 2;
 const MAX_BIN_SIZE = 8;
+const CANVAS_PADDING = 32; // px padding between canvas edge and drawer area
+const LABEL_ZONE = CANVAS_PADDING / 2; // center labels within the padding zone
 
 export function Canvas() {
   const {
@@ -140,11 +142,19 @@ export function Canvas() {
     () => ({ widthPx: drawerWidth * gridSize, heightPx: drawerLength * gridSize }),
     [drawerWidth, drawerLength, gridSize]
   );
+  const canvasSize = useMemo(
+    () => ({
+      widthPx: dropAreaSize.widthPx + CANVAS_PADDING * 2,
+      heightPx: dropAreaSize.heightPx + CANVAS_PADDING * 2
+    }),
+    [dropAreaSize]
+  );
 
   const { setNodeRef: setDropNodeRef } = useDroppable({ id: 'drop-area' });
 
   const clampSnap = (value: number) => Math.max(0.5, Math.min(2, value));
   const snapValue = clampSnap(snap);
+  const gridStepPx = gridSize * snapValue;
   const applySnap = (value: number) => Math.round(value / snapValue) * snapValue;
   const snapToBounds = (value: number, max: number) => {
     if (value <= snapValue) return 0;
@@ -248,9 +258,13 @@ export function Canvas() {
     if (!size) return null;
     const maxX = Math.max(0, drawerWidth - size.width);
     const maxY = Math.max(0, drawerLength - size.length);
+    const isOutOfBounds =
+      rawX < 0 ||
+      rawY < 0 ||
+      rawX + size.width > drawerWidth ||
+      rawY + size.length > drawerLength;
     const snappedX = snapToBounds(rawX, maxX);
     const snappedY = snapToBounds(rawY, maxY);
-    const isOutOfBounds = snappedX < 0 || snappedY < 0 || snappedX > maxX || snappedY > maxY;
     const x = Math.max(0, Math.min(snappedX, maxX));
     const y = Math.max(0, Math.min(snappedY, maxY));
     return { rawX, rawY, x, y, size, isOutOfBounds };
@@ -266,9 +280,13 @@ export function Canvas() {
     const rawY = originPlacementRef.current.y + delta.y / gridSize;
     const maxX = Math.max(0, drawerWidth - size.width);
     const maxY = Math.max(0, drawerLength - size.length);
+    const isOutOfBounds =
+      rawX < 0 ||
+      rawY < 0 ||
+      rawX + size.width > drawerWidth ||
+      rawY + size.length > drawerLength;
     const snappedX = snapToBounds(rawX, maxX);
     const snappedY = snapToBounds(rawY, maxY);
-    const isOutOfBounds = snappedX < 0 || snappedY < 0 || snappedX > maxX || snappedY > maxY;
     const x = Math.max(0, Math.min(snappedX, maxX));
     const y = Math.max(0, Math.min(snappedY, maxY));
     return { rawX, rawY, x, y, size, isOutOfBounds };
@@ -445,36 +463,60 @@ export function Canvas() {
         className="flex-1 flex items-center justify-center p-12 overflow-auto"
       >
         <div
-          className="bg-white rounded-lg shadow-xl border border-slate-900/[0.06] relative transition-transform duration-200"
+          className="bg-slate-100/70 rounded-lg shadow-xl border border-slate-900/[0.06] relative transition-transform duration-200"
           style={{
-            width: `${dropAreaSize.widthPx}px`,
-            height: `${dropAreaSize.heightPx}px`
+            width: `${canvasSize.widthPx}px`,
+            height: `${canvasSize.heightPx}px`
           }}
         >
-          {showGrid && (
-            <div
-              data-testid="grid-overlay"
-              className="absolute inset-0 pointer-events-none opacity-20"
-              style={{
-                backgroundImage:
-                  'linear-gradient(#14476B 1px, transparent 1px), linear-gradient(90deg, #14476B 1px, transparent 1px)',
-                backgroundSize: `${gridSize}px ${gridSize}px`
-              }}
-            />
-          )}
-
-          <div className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs font-medium text-slate-400 bg-slate-100 px-2 py-1 rounded-full">
-            {drawerWidth}" Width
+          <div
+            className="absolute z-10"
+            style={{
+              left: CANVAS_PADDING + dropAreaSize.widthPx / 2,
+              top: LABEL_ZONE,
+              transform: 'translate(-50%, -50%)'
+            }}
+          >
+            <div className="text-xs font-medium text-slate-400 bg-white px-2 py-1 rounded-full shadow-sm">
+              {drawerWidth}" Width
+            </div>
           </div>
-          <div className="absolute -left-8 top-1/2 -translate-y-1/2 -rotate-90 text-xs font-medium text-slate-400 bg-slate-100 px-2 py-1 rounded-full">
-            {drawerLength}" Length
+          <div
+            className="absolute z-10"
+            style={{
+              left: LABEL_ZONE,
+              top: CANVAS_PADDING + dropAreaSize.heightPx / 2,
+              transform: 'translate(-50%, -50%)'
+            }}
+          >
+            <div className="text-xs font-medium text-slate-400 bg-white px-2 py-1 rounded-full shadow-sm -rotate-90">
+              {drawerLength}" Length
+            </div>
           </div>
 
           <div
             ref={attachDropAreaRef}
-            className="absolute inset-4 border-2 border-dashed border-slate-200 rounded-md bg-slate-50/50"
+            className="absolute bg-white shadow-inner"
+            style={{
+              left: CANVAS_PADDING,
+              top: CANVAS_PADDING,
+              width: `${dropAreaSize.widthPx}px`,
+              height: `${dropAreaSize.heightPx}px`
+            }}
             data-testid="canvas-drop-area"
           >
+            {showGrid && (
+              <div
+                data-testid="grid-overlay"
+                className="absolute inset-0 pointer-events-none opacity-25"
+                style={{
+                  backgroundImage:
+                    'linear-gradient(#14476B 1px, transparent 1px), linear-gradient(90deg, #14476B 1px, transparent 1px)',
+                  backgroundSize: `${gridStepPx}px ${gridStepPx}px`
+                }}
+              />
+            )}
+
             {placements.map((placement) => {
               const size = getPlacementSize(placement);
               if (!size) return null;
@@ -500,74 +542,82 @@ export function Canvas() {
               </div>
             )}
 
+            <div className="absolute inset-0 pointer-events-none border-2 border-slate-300" />
+
           </div>
         </div>
       </div>
 
-      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-white/90 backdrop-blur shadow-lg border border-slate-200 rounded-full px-4 py-2 flex items-center gap-4">
-        <div className="flex items-center gap-1">
-          <button
-            onClick={undo}
-            disabled={!canUndo}
-            title="Undo (Ctrl/Cmd+Z)"
-            className="p-2 hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600"
-          >
-            <RotateCcw className="h-4 w-4" />
-          </button>
-          <button
-            onClick={redo}
-            disabled={!canRedo}
-            title="Redo (Shift+Ctrl/Cmd+Z)"
-            className="p-2 hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600"
-          >
-            <RotateCw className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="w-px h-4 bg-slate-200" />
-
-        <button
-          onClick={() => setShowGrid(!showGrid)}
-          title="Toggle grid"
-          className={`p-2 rounded-full transition-colors ${
-            showGrid ? 'bg-[#14476B]/10 text-[#14476B]' : 'hover:bg-slate-100 text-slate-600'
-          }`}
-        >
-          <Grid className="h-4 w-4" />
-        </button>
-
-        <div className="flex items-center gap-2">
-          <div className="p-2 rounded-full bg-slate-100 text-slate-700">
-            <Magnet className="h-4 w-4" />
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-500">Snap</span>
-            <input
-              aria-label="Snap distance"
-              title="Snap distance (inches)"
-              type="number"
-              min={0.5}
-              max={2}
-              step={0.5}
-              value={snap}
-              onChange={(e) => setSnap(clampSnap(Number(e.target.value) || 0.5))}
-              className="w-14 px-2 py-1 text-xs rounded-md border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#14476B]/20"
-            />
+      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-white/90 backdrop-blur shadow-lg border border-slate-200 rounded-full px-4 py-2 flex items-start gap-5">
+        <div className="flex flex-col items-center gap-1">
+          <span className="text-xs uppercase tracking-wide text-slate-400">History</span>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={undo}
+              disabled={!canUndo}
+              title="Undo (Ctrl/Cmd+Z)"
+              className="p-2 hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600"
+            >
+              <RotateCcw className="h-4 w-4" />
+            </button>
+            <button
+              onClick={redo}
+              disabled={!canRedo}
+              title="Redo (Shift+Ctrl/Cmd+Z)"
+              className="p-2 hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600"
+            >
+              <RotateCw className="h-4 w-4" />
+            </button>
           </div>
         </div>
 
-        <div className="w-px h-4 bg-slate-200" />
+        <div className="w-px bg-slate-200 self-stretch my-1" />
 
-        <Button
-          size="sm"
-          variant="ghost"
-          className="text-[#14476B]"
-          leftIcon={<Sparkles className="h-3 w-3" />}
-          onClick={handleSuggestLayout}
-          disabled={placements.length === 0}
-        >
-          Suggest Layout
-        </Button>
+        <div className="flex flex-col items-center gap-1">
+          <span className="text-xs uppercase tracking-wide text-slate-400">Grid</span>
+          <button
+            onClick={() => setShowGrid(!showGrid)}
+            title="Toggle grid"
+            className={`p-2 rounded-full transition-colors ${
+              showGrid ? 'bg-[#14476B]/10 text-[#14476B]' : 'hover:bg-slate-100 text-slate-600'
+            }`}
+          >
+            <Grid className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="w-px bg-slate-200 self-stretch my-1" />
+
+        <div className="flex flex-col items-center gap-1">
+          <span className="text-xs uppercase tracking-wide text-slate-400">Grid Size</span>
+          <input
+            aria-label="Snap to grid"
+            title="Snap to the nearest grid line (inches)"
+            type="number"
+            min={0.5}
+            max={2}
+            step={0.5}
+            value={snap}
+            onChange={(e) => setSnap(clampSnap(Number(e.target.value) || 0.5))}
+            className="w-14 px-2 py-1 text-xs rounded-md border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#14476B]/20"
+          />
+        </div>
+
+        <div className="w-px bg-slate-200 self-stretch my-1" />
+
+        <div className="flex flex-col items-center gap-1">
+          <span className="text-xs uppercase tracking-wide text-slate-400">Layout</span>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-[#14476B]"
+            leftIcon={<Sparkles className="h-3 w-3" />}
+            onClick={handleSuggestLayout}
+            disabled={placements.length === 0}
+          >
+            Suggest
+          </Button>
+        </div>
       </div>
 
       {editor && selectedPlacement && selectedSize && (
@@ -589,7 +639,7 @@ export function Canvas() {
           </div>
 
           <div className="space-y-2">
-            <label className="flex flex-col gap-1 text-[11px] text-slate-500">
+            <label className="flex flex-col gap-1 text-xs text-slate-500">
               Label
               <input
                 data-testid="placement-label"
@@ -608,7 +658,7 @@ export function Canvas() {
               />
             </label>
 
-            <label className="flex items-center justify-between text-[11px] text-slate-500">
+            <label className="flex items-center justify-between text-xs text-slate-500">
               Color
               <input
                 data-testid="placement-color"
@@ -620,7 +670,7 @@ export function Canvas() {
             </label>
 
             <div className="space-y-2">
-              <div className="flex items-center justify-between text-[11px] text-slate-500">
+              <div className="flex items-center justify-between text-xs text-slate-500">
                 <span>Width</span>
                 <div className="flex items-center gap-2">
                   <button
@@ -645,7 +695,7 @@ export function Canvas() {
                 </div>
               </div>
 
-              <div className="flex items-center justify-between text-[11px] text-slate-500">
+              <div className="flex items-center justify-between text-xs text-slate-500">
                 <span>Length</span>
                 <div className="flex items-center gap-2">
                   <button
@@ -670,7 +720,7 @@ export function Canvas() {
                 </div>
               </div>
             </div>
-            <p className="text-[10px] text-slate-400">Sizes adjust in {SIZE_STEP}" steps (min {MIN_BIN_SIZE}", max {MAX_BIN_SIZE}").</p>
+            <p className="text-xs text-slate-400">Sizes adjust in {SIZE_STEP}" steps (min {MIN_BIN_SIZE}", max {MAX_BIN_SIZE}").</p>
           </div>
         </div>
       )}
@@ -746,11 +796,11 @@ function DraggablePlacement({
     >
       <div className="flex flex-col items-center gap-0.5">
         {placement.label && (
-          <span className="text-[10px] font-semibold leading-none">
+          <span className="text-xs font-semibold leading-none">
             {placement.label}
           </span>
         )}
-        <span className="text-[10px] font-medium leading-none">
+        <span className="text-xs font-medium leading-none">
           {size.width}x{size.length}
         </span>
       </div>

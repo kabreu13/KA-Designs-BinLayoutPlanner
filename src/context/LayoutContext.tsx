@@ -202,6 +202,9 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
   const addPlacement = (binId: string, x = 0, y = 0): PlacementResult => {
     const bin = BINS.find((b) => b.id === binId);
     if (!bin) return { status: 'blocked' };
+    if (bin.width > state.drawerWidth || bin.length > state.drawerLength) {
+      return { status: 'blocked' };
+    }
 
     const { x: safeX, y: safeY } = clampPosition(x, y, bin, state.drawerWidth, state.drawerLength);
 

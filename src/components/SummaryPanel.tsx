@@ -24,48 +24,62 @@ export function SummaryPanel() {
     return () => window.clearTimeout(id);
   }, [status]);
 
+  const uniquePlacements = useMemo(() => {
+    const seen = new Map<string, typeof placements[number]>();
+    placements.forEach((placement) => {
+      if (!seen.has(placement.id)) {
+        seen.set(placement.id, placement);
+      }
+    });
+    return Array.from(seen.values());
+  }, [placements]);
+
   const placementGroups = useMemo(() => {
     const groups = new Map<
       string,
       {
         placements: typeof placements;
-        bin: typeof bins[number] | undefined;
         width: number;
         length: number;
-        label: string;
-        color: string | undefined;
+        colors: Set<string>;
       }
     >();
 
-    placements.forEach((placement) => {
+    uniquePlacements.forEach((placement) => {
       const bin = bins.find((b) => b.id === placement.binId);
       const width = placement.width ?? bin?.width;
       const length = placement.length ?? bin?.length;
       if (width == null || length == null) return;
-      const label = placement.label?.trim() || bin?.name || 'Custom Bin';
-      const color = placement.color;
-      const key = `${placement.binId}-${width}x${length}-${label}-${color ?? 'none'}`;
+      const key = `${width}x${length}`;
       const existing = groups.get(key);
       if (existing) {
         existing.placements.push(placement);
+        if (placement.color) existing.colors.add(placement.color);
       } else {
         groups.set(key, {
           placements: [placement],
-          bin,
           width,
           length,
-          label,
-          color
+          colors: new Set(placement.color ? [placement.color] : [])
         });
       }
     });
 
-    return Array.from(groups.values()).sort((a, b) => b.placements.length - a.placements.length);
-  }, [placements, bins]);
+    return Array.from(groups.values())
+      .map((group) => {
+        const colors = Array.from(group.colors);
+        return {
+          ...group,
+          label: `${group.width}x${group.length} Bin`,
+          color: colors.length === 1 ? colors[0] : undefined
+        };
+      })
+      .sort((a, b) => b.placements.length - a.placements.length);
+  }, [uniquePlacements, bins]);
 
   const invalidCount = useMemo(() => {
     const invalid = new Set<string>();
-    const sized = placements
+    const sized = uniquePlacements
       .map((placement) => {
         const bin = bins.find((b) => b.id === placement.binId);
         const width = placement.width ?? bin?.width;
@@ -103,7 +117,7 @@ export function SummaryPanel() {
     }
 
     return invalid.size;
-  }, [placements, bins, drawerWidth, drawerLength]);
+  }, [uniquePlacements, bins, drawerWidth, drawerLength]);
 
   return (
     <div className="w-[320px] bg-white border-l border-slate-900/[0.06] flex flex-col h-full">
@@ -151,7 +165,7 @@ export function SummaryPanel() {
           </div>
           <p className="text-xs text-slate-400 flex items-center gap-1 mt-2">
             <AlertCircle className="h-3 w-3" />
-            {placements.length} bins placed · Drawer area {drawerArea.toFixed(0)} in²
+            {uniquePlacements.length} bins placed · Drawer area {drawerArea.toFixed(0)} in²
           </p>
           <p
             className={`text-xs flex items-center gap-1 ${
@@ -181,7 +195,7 @@ export function SummaryPanel() {
             >
               <div className="flex items-center gap-3">
                 <div
-                  className="h-10 w-10 border border-slate-200 text-[10px] text-slate-500 flex items-center justify-center rounded-md"
+                  className="h-10 w-10 border border-slate-200 text-xs text-slate-500 flex items-center justify-center rounded-md"
                   style={{ backgroundColor: group.color ?? '#f1f5f9' }}
                 >
                   {group.width}x{group.length}
@@ -191,7 +205,7 @@ export function SummaryPanel() {
                     {group.label}
                   </p>
                   {group.placements.length > 1 && (
-                    <p className="text-[11px] text-slate-400">x {group.placements.length} of them</p>
+                    <p className="text-xs text-slate-400">x {group.placements.length} of them</p>
                   )}
                 </div>
               </div>
