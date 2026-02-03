@@ -181,18 +181,13 @@ export async function exportLayoutToPdf(
   const usedArea = preparedPlacements.reduce((sum, item) => sum + item.width * item.length, 0);
   const usedPercent = drawerArea > 0 ? Math.min(100, (usedArea / drawerArea) * 100) : 0;
 
-  const generatedAt = new Intl.DateTimeFormat(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'short'
-  }).format(new Date());
-
   doc.setFontSize(16);
   doc.setTextColor(...TEXT_PRIMARY);
   doc.text('Bin Layout Plan', PAGE_MARGIN_MM, HEADER_TITLE_Y_MM);
   doc.setFontSize(10);
   doc.setTextColor(...TEXT_MUTED);
   doc.text(
-    `Drawer: ${formatInches(drawerWidth)}" x ${formatInches(drawerLength)}"   |   Generated: ${generatedAt}`,
+    `Drawer: ${formatInches(drawerWidth)}" x ${formatInches(drawerLength)}"`,
     PAGE_MARGIN_MM,
     HEADER_META_Y_MM
   );
@@ -246,13 +241,13 @@ export async function exportLayoutToPdf(
 
     if (width >= 7 && length >= 6) {
       doc.setTextColor(...textColor);
-      doc.setFontSize(7);
+      doc.setFontSize(12);
       doc.text(`#${item.index}`, x + 1.2, y + 4.2);
     }
 
     if (width >= 12 && length >= 8) {
       doc.setTextColor(...textColor);
-      doc.setFontSize(6.5);
+      doc.setFontSize(16);
       doc.text(`${formatInches(item.length)}x${formatInches(item.width)}`, x + width / 2, y + length / 2 + 1, {
         align: 'center'
       });
