@@ -1,10 +1,13 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
-import { DndContext, PointerSensor, TouchSensor, MouseSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { DndContext, PointerSensor, TouchSensor, MouseSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { BinCatalog } from '../components/BinCatalog';
 import { Canvas } from '../components/Canvas';
 import { SummaryPanel } from '../components/SummaryPanel';
+import { BinSizePreview } from '../components/BinSizePreview';
+import { useLayout } from '../context/LayoutContext';
+import type { DragItem } from '../utils/dragMath';
 
 type PanelSide = 'left' | 'right';
 
@@ -12,16 +15,31 @@ const panelWidthClass = 'w-[320px]';
 const collapsedWidthClass = 'w-[40px]';
 
 export function Workspace() {
+  const { bins } = useLayout();
   const [isCatalogOpen, setIsCatalogOpen] = useState(true);
   const [isSummaryOpen, setIsSummaryOpen] = useState(true);
+  const [activeBinId, setActiveBinId] = useState<string | null>(null);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(MouseSensor, { activationConstraint: { distance: 0 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 120, tolerance: 6 } })
   );
+  const activeBin = activeBinId ? bins.find((bin) => bin.id === activeBinId) ?? null : null;
 
   return (
-    <DndContext sensors={sensors}>
+    <DndContext
+      sensors={sensors}
+      onDragStart={(event) => {
+        const drag = event.active.data.current as DragItem | undefined;
+        if (!drag || drag.type !== 'bin') {
+          setActiveBinId(null);
+          return;
+        }
+        setActiveBinId(drag.binId);
+      }}
+      onDragEnd={() => setActiveBinId(null)}
+      onDragCancel={() => setActiveBinId(null)}
+    >
       <div className="flex h-[calc(100vh-64px)] overflow-hidden bg-[#F6F7F8]">
         <SidePanel
           side="left"
@@ -41,6 +59,15 @@ export function Workspace() {
           <SummaryPanel />
         </SidePanel>
       </div>
+      <DragOverlay dropAnimation={null}>
+        {activeBin && (
+          <div className="rounded-xl border border-slate-200 bg-white shadow-xl">
+            <div className="p-4 flex items-center justify-center">
+              <BinSizePreview width={activeBin.width} length={activeBin.length} size="catalog" />
+            </div>
+          </div>
+        )}
+      </DragOverlay>
     </DndContext>
   );
 }

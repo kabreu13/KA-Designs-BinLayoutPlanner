@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { BINS } from '../data/bins';
 import { clampPosition, hasCollision, findFirstFit } from '../utils/layoutMath';
+import { DEFAULT_BIN_COLOR, normalizeHexColor } from '../utils/colors';
 
 export type BinCategory = 'small' | 'medium' | 'large';
 
@@ -63,7 +64,12 @@ interface LayoutContextValue {
   addPlacement: (binId: string, x?: number, y?: number) => PlacementResult;
   movePlacement: (placementId: string, x: number, y: number) => PlacementResult;
   updatePlacement: (placementId: string, updates: Partial<Pick<Placement, 'width' | 'length' | 'color' | 'label'>>) => PlacementResult;
+  updatePlacements: (placementIds: string[], updates: Partial<Pick<Placement, 'width' | 'length' | 'color' | 'label'>>) => PlacementResult;
   removePlacement: (placementId: string) => void;
+  clearPlacements: () => void;
+  activePlacementEditor: { placementIds: string[]; x: number; y: number } | null;
+  openPlacementEditor: (placementIds: string[], x: number, y: number) => void;
+  closePlacementEditor: () => void;
   setDrawerSize: (width: number, length: number) => void;
   undo: () => void;
   redo: () => void;
@@ -77,6 +83,11 @@ interface LayoutContextValue {
 
 const LayoutContext = createContext<LayoutContextValue | undefined>(undefined);
 const STORAGE_KEY = 'bin-layout-state';
+const withDefaultColor = (placement: Placement): Placement => ({
+  ...placement,
+  color: normalizeHexColor(placement.color ?? DEFAULT_BIN_COLOR)
+});
+const normalizePlacements = (placements: Placement[]) => placements.map(withDefaultColor);
 
 export function LayoutProvider({ children }: { children: React.ReactNode }) {
   const devWarn = (...args: unknown[]) => {
@@ -103,6 +114,7 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
     present: initial,
     future: []
   }));
+  const [activePlacementEditor, setActivePlacementEditor] = useState<{ placementIds: string[]; x: number; y: number } | null>(null);
 
   const state = history.present;
   const getPlacementSize = (placement: Placement) => {
@@ -125,7 +137,7 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
           present: {
             drawerWidth: parsed.drawerWidth,
             drawerLength: parsed.drawerLength,
-            placements: parsed.placements,
+            placements: normalizePlacements(parsed.placements),
             usage: parsed.usage ?? {}
           },
           future: []
@@ -150,7 +162,7 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
           present: {
             drawerWidth: parsed.drawerWidth,
             drawerLength: parsed.drawerLength,
-            placements: parsed.placements,
+            placements: normalizePlacements(parsed.placements),
             usage: parsed.usage ?? {}
           },
           future: []
@@ -237,7 +249,8 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
           x: target.x,
           y: target.y,
           width: bin.width,
-          length: bin.length
+          length: bin.length,
+          color: DEFAULT_BIN_COLOR
         }
       ],
       usage: { ...state.usage, [binId]: (state.usage[binId] ?? 0) + 1 }
@@ -304,6 +317,7 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
 
       const nextWidth = updates.width ?? currentSize.width;
       const nextLength = updates.length ?? currentSize.length;
+      const nextColor = updates.color ? normalizeHexColor(updates.color) : undefined;
       const size = { width: nextWidth, length: nextLength };
       if (size.width < 2 || size.length < 2 || size.width > 8 || size.length > 8) {
         result = { status: 'blocked' };
@@ -318,6 +332,7 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
             ? {
                 ...p,
                 ...updates,
+                ...(nextColor ? { color: nextColor } : {}),
                 width: nextWidth,
                 length: nextLength,
                 x: placement.x,
@@ -325,6 +340,54 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
               }
             : p
         )
+      };
+    })();
+
+    if (next) pushState(next);
+    return result;
+  };
+
+  const updatePlacements = (
+    placementIds: string[],
+    updates: Partial<Pick<Placement, 'width' | 'length' | 'color' | 'label'>>
+  ): PlacementResult => {
+    const ids = Array.from(new Set(placementIds));
+    if (ids.length === 0) return { status: 'blocked' };
+    let result: PlacementResult = { status: 'blocked' };
+    const next = (() => {
+      const targetSet = new Set(ids);
+      const targetPlacements = state.placements.filter((placement) => targetSet.has(placement.id));
+      if (targetPlacements.length === 0) return null;
+      const nextColor = updates.color ? normalizeHexColor(updates.color) : undefined;
+
+      const nextById = new Map<string, Placement>();
+      for (const placement of targetPlacements) {
+        const currentSize = getPlacementSize(placement);
+        if (!currentSize) return null;
+        const nextWidth = updates.width ?? currentSize.width;
+        const nextLength = updates.length ?? currentSize.length;
+        if (nextWidth < 2 || nextLength < 2 || nextWidth > 8 || nextLength > 8) {
+          return null;
+        }
+        nextById.set(placement.id, {
+          ...placement,
+          ...updates,
+          ...(nextColor ? { color: nextColor } : {}),
+          width: nextWidth,
+          length: nextLength,
+          x: placement.x,
+          y: placement.y
+        });
+      }
+
+      result = {
+        status: 'placed',
+        position: { x: targetPlacements[0].x, y: targetPlacements[0].y }
+      };
+
+      return {
+        ...state,
+        placements: state.placements.map((placement) => nextById.get(placement.id) ?? placement)
       };
     })();
 
@@ -409,6 +472,24 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
+  const clearPlacements = () => {
+    if (state.placements.length === 0) return;
+    pushState({
+      ...state,
+      placements: []
+    });
+  };
+
+  const openPlacementEditor = (placementIds: string[], x: number, y: number) => {
+    const ids = Array.from(new Set(placementIds));
+    if (ids.length === 0) return;
+    setActivePlacementEditor({ placementIds: ids, x, y });
+  };
+
+  const closePlacementEditor = () => {
+    setActivePlacementEditor(null);
+  };
+
   const setDrawerSize = (width: number, length: number) => {
     pushState({ ...state, drawerWidth: width, drawerLength: length });
   };
@@ -441,7 +522,7 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
     pushState({
       drawerWidth: incoming.drawerWidth,
       drawerLength: incoming.drawerLength,
-      placements: incoming.placements,
+      placements: normalizePlacements(incoming.placements),
       usage: incoming.usage ?? state.usage
     });
     return true;
@@ -489,7 +570,12 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
     addPlacement,
     movePlacement,
     updatePlacement,
+    updatePlacements,
     removePlacement,
+    clearPlacements,
+    activePlacementEditor,
+    openPlacementEditor,
+    closePlacementEditor,
     setDrawerSize,
     undo,
     redo,

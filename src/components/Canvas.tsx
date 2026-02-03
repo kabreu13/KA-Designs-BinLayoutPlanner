@@ -2,10 +2,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { useDndMonitor, useDroppable, useDraggable } from '@dnd-kit/core';
 import { Button } from './ui/Button';
-import { Grid, Sparkles, RotateCcw, RotateCw, Magnet } from 'lucide-react';
+import { Grid, Sparkles, RotateCcw, RotateCw, PaintBucket, Trash2 } from 'lucide-react';
 import { useLayout } from '../context/LayoutContext';
 import { applyDelta, type DragItem, type Point } from '../utils/dragMath';
 import type { Bin, Placement } from '../context/LayoutContext';
+import {
+  CUSTOM_COLOR_VALUE,
+  DEFAULT_BIN_COLOR,
+  PRESET_COLORS,
+  getColorLabel,
+  getColorSelection,
+  getContrastText,
+  normalizeHexColor
+} from '../utils/colors';
 
 const GRID_SIZE = 25; // px per inch on canvas
 const FRAME_THROTTLE_MS = 16; // ~60fps
@@ -14,6 +23,37 @@ const MIN_BIN_SIZE = 2;
 const MAX_BIN_SIZE = 8;
 const CANVAS_PADDING = 32; // px padding between canvas edge and drawer area
 const LABEL_ZONE = CANVAS_PADDING / 2; // center labels within the padding zone
+const EDITOR_WIDTH_PX = 240;
+const EDITOR_OFFSET_PX = 12;
+const VIEWPORT_PADDING_PX = 8;
+
+const TOUR_STEPS = [
+  {
+    selector: '[data-testid="side-panel-left"]',
+    title: '1. Pick A Bin',
+    description: 'Use the Bin Catalog on the left to browse sizes. Drag a bin card to start placing.'
+  },
+  {
+    selector: '[data-tour="canvas-drop-zone"]',
+    title: '2. Drop On Canvas',
+    description: 'Drop bins inside the drawer area. Bins snap to the grid and stay within bounds.'
+  },
+  {
+    selector: '[data-tour="quick-actions-pill"]',
+    title: '3. Use Quick Actions',
+    description: 'Undo/redo, toggle grid, change grid size, suggest layout, clear everything, and change bin color.'
+  },
+  {
+    selector: '[data-tour="tour-bin-editor"]',
+    title: '4. Edit A Bin',
+    description: 'Click a bin on the canvas to open this editor and adjust label, color, width, and length.'
+  },
+  {
+    selector: '[data-testid="side-panel-right"]',
+    title: '5. Review Summary',
+    description: 'Use the right panel for drawer settings, placed item groups, exports, and quick edits.'
+  }
+] as const;
 
 export function Canvas() {
   const {
@@ -24,6 +64,10 @@ export function Canvas() {
     addPlacement,
     movePlacement,
     updatePlacement,
+    updatePlacements,
+    clearPlacements,
+    activePlacementEditor,
+    closePlacementEditor,
     undo,
     redo,
     canUndo,
@@ -42,9 +86,17 @@ export function Canvas() {
   const [suggestMode, setSuggestMode] = useState<'pack' | 'random'>('pack');
   const [toast, setToast] = useState<{ type: 'info' | 'error'; message: string } | null>(null);
   const [dragStatus, setDragStatus] = useState<{ placementId: string; fits: boolean } | null>(null);
-  const [editor, setEditor] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [editor, setEditor] = useState<{ placementIds: string[]; x: number; y: number } | null>(null);
   const [labelDraft, setLabelDraft] = useState('');
-  const [colorDraft, setColorDraft] = useState('#ffffff');
+  const [colorDraft, setColorDraft] = useState(DEFAULT_BIN_COLOR);
+  const [colorSelection, setColorSelection] = useState<string>(DEFAULT_BIN_COLOR);
+  const [paintMode, setPaintMode] = useState(false);
+  const [paintColorDraft, setPaintColorDraft] = useState(DEFAULT_BIN_COLOR);
+  const [paintColorSelection, setPaintColorSelection] = useState<string>(DEFAULT_BIN_COLOR);
+  const [showHowTo, setShowHowTo] = useState(true);
+  const [tourActive, setTourActive] = useState(false);
+  const [tourStepIndex, setTourStepIndex] = useState(0);
+  const [tourTargetRect, setTourTargetRect] = useState<DOMRect | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const dropAreaRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<HTMLDivElement | null>(null);
@@ -63,16 +115,31 @@ export function Canvas() {
   useEffect(() => {
     if (placements.length === 0) {
       setSuggestMode('pack');
+      setPaintMode(false);
     }
   }, [placements.length]);
 
   useEffect(() => {
+    if (!activePlacementEditor) return;
+    setEditor(activePlacementEditor);
+  }, [activePlacementEditor]);
+
+  const closeEditor = useCallback(() => {
+    setEditor(null);
+    closePlacementEditor();
+  }, [closePlacementEditor]);
+
+  useEffect(() => {
     if (!editor) return;
-    const placement = placements.find((p) => p.id === editor.id);
-    if (!placement) return;
+    const placement = placements.find((p) => p.id === editor.placementIds[0]);
+    if (!placement) {
+      closeEditor();
+      return;
+    }
     setLabelDraft(placement.label ?? '');
-    setColorDraft(placement.color ?? '#ffffff');
-  }, [editor, placements]);
+    setColorDraft(normalizeHexColor(placement.color ?? DEFAULT_BIN_COLOR));
+    setColorSelection(getColorSelection(placement.color));
+  }, [closeEditor, editor, placements]);
 
   useEffect(() => {
     if (!editor) return;
@@ -80,10 +147,10 @@ export function Canvas() {
       const target = event.target as Node | null;
       if (!target) return;
       if (editorRef.current?.contains(target)) return;
-      setEditor(null);
+      closeEditor();
     };
     const handleKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setEditor(null);
+      if (event.key === 'Escape') closeEditor();
     };
     window.addEventListener('mousedown', handlePointer);
     window.addEventListener('keydown', handleKey);
@@ -91,7 +158,7 @@ export function Canvas() {
       window.removeEventListener('mousedown', handlePointer);
       window.removeEventListener('keydown', handleKey);
     };
-  }, [editor]);
+  }, [closeEditor, editor]);
 
   const handleSuggestLayout = () => {
     const mode = suggestMode;
@@ -114,28 +181,163 @@ export function Canvas() {
   };
 
   const handleResize = (axis: 'width' | 'length', direction: -1 | 1) => {
-    if (!selectedPlacement || !selectedSize) return;
+    if (!selectedSize || selectedPlacementIds.length === 0) return;
     const current = axis === 'width' ? selectedSize.width : selectedSize.length;
     const next = Math.max(MIN_BIN_SIZE, Math.min(MAX_BIN_SIZE, current + direction * SIZE_STEP));
     if (next === current) return;
-    const result = updatePlacement(selectedPlacement.id, { [axis]: next });
-    if (result.status === 'blocked') {
-      setToast({ type: 'error', message: 'Cannot resize — no space available.' });
-    } else if (result.status === 'autofit') {
-      setToast({ type: 'info', message: 'Resized and auto-fit to the nearest space.' });
-    }
+    const result = updatePlacements(selectedPlacementIds, { [axis]: next });
+    if (result.status === 'blocked') setToast({ type: 'error', message: 'Cannot resize — no space available.' });
   };
 
   const commitLabel = () => {
-    if (!selectedPlacement) return;
-    updatePlacement(selectedPlacement.id, { label: labelDraft.trim() });
+    if (selectedPlacementIds.length === 0) return;
+    const nextLabel = labelDraft.trim();
+    updatePlacements(selectedPlacementIds, { label: nextLabel });
   };
 
   const handleColorChange = (value: string) => {
-    if (!selectedPlacement) return;
-    setColorDraft(value);
-    updatePlacement(selectedPlacement.id, { color: value });
+    if (selectedPlacementIds.length === 0) return;
+    const normalizedColor = normalizeHexColor(value);
+    setColorDraft(normalizedColor);
+    setColorSelection(getColorSelection(normalizedColor));
+    updatePlacements(selectedPlacementIds, { color: normalizedColor });
   };
+
+  const handleColorSelectionChange = (value: string) => {
+    setColorSelection(value);
+    if (value === CUSTOM_COLOR_VALUE || selectedPlacementIds.length === 0) return;
+    setColorDraft(value);
+    updatePlacements(selectedPlacementIds, { color: value });
+  };
+
+  const togglePaintMode = () => {
+    setPaintMode((active) => {
+      const next = !active;
+      if (next) closeEditor();
+      return next;
+    });
+  };
+
+  const handlePaintColorSelectionChange = (value: string) => {
+    setPaintColorSelection(value);
+    if (value === CUSTOM_COLOR_VALUE) return;
+    setPaintColorDraft(value);
+  };
+
+  const handlePaintColorChange = (value: string) => {
+    const normalizedColor = normalizeHexColor(value);
+    setPaintColorDraft(normalizedColor);
+    setPaintColorSelection(getColorSelection(normalizedColor));
+  };
+
+  const getActivePaintColor = () =>
+    paintColorSelection === CUSTOM_COLOR_VALUE ? paintColorDraft : paintColorSelection;
+
+  const paintPlacement = (placementId: string) => {
+    if (!paintMode) return;
+    updatePlacement(placementId, { color: getActivePaintColor() });
+  };
+
+  useEffect(() => {
+    if (!paintMode) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      if (target.closest('[data-testid="placed-bin"]')) return;
+      if (target.closest('[data-testid="paint-mode-toggle"]')) return;
+      if (target.closest('[data-testid="paint-color-select"]')) return;
+      if (target.closest('[data-testid="paint-color-custom"]')) return;
+      setPaintMode(false);
+    };
+    window.addEventListener('pointerdown', handlePointerDown, true);
+    return () => window.removeEventListener('pointerdown', handlePointerDown, true);
+  }, [paintMode]);
+
+  const stopTour = useCallback(() => {
+    setTourActive(false);
+    setTourTargetRect(null);
+  }, []);
+
+  const startTour = () => {
+    setShowHowTo(false);
+    setTourStepIndex(0);
+    setTourActive(true);
+  };
+
+  const nextTourStep = () => {
+    if (tourStepIndex >= TOUR_STEPS.length - 1) {
+      stopTour();
+      return;
+    }
+    setTourStepIndex((current) => Math.min(current + 1, TOUR_STEPS.length - 1));
+  };
+
+  const previousTourStep = () => {
+    setTourStepIndex((current) => Math.max(0, current - 1));
+  };
+
+  const activeTourStep = tourActive ? TOUR_STEPS[tourStepIndex] : null;
+  const updateTourTarget = useCallback(
+    (scrollIntoView: boolean) => {
+      if (!activeTourStep) {
+        setTourTargetRect(null);
+        return;
+      }
+      const target = document.querySelector(activeTourStep.selector) as HTMLElement | null;
+      if (!target) {
+        setTourTargetRect(null);
+        return;
+      }
+      if (scrollIntoView) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+      }
+      setTourTargetRect(target.getBoundingClientRect());
+    },
+    [activeTourStep]
+  );
+
+  useEffect(() => {
+    if (!tourActive) return;
+    updateTourTarget(true);
+    const id = window.setTimeout(() => updateTourTarget(false), 220);
+    return () => window.clearTimeout(id);
+  }, [tourActive, tourStepIndex, updateTourTarget]);
+
+  useEffect(() => {
+    if (!tourActive) return;
+    const handlePositionUpdate = () => updateTourTarget(false);
+    window.addEventListener('resize', handlePositionUpdate);
+    window.addEventListener('scroll', handlePositionUpdate, true);
+    return () => {
+      window.removeEventListener('resize', handlePositionUpdate);
+      window.removeEventListener('scroll', handlePositionUpdate, true);
+    };
+  }, [tourActive, updateTourTarget]);
+
+  const tourPopoverPosition = useMemo(() => {
+    if (!tourTargetRect) {
+      return { top: 20, left: 20 };
+    }
+    const popoverWidth = 320;
+    const popoverHeight = 190;
+    const spacing = 12;
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+
+    let left = tourTargetRect.left;
+    if (left + popoverWidth + VIEWPORT_PADDING_PX > viewportWidth) {
+      left = viewportWidth - popoverWidth - VIEWPORT_PADDING_PX;
+    }
+    left = Math.max(VIEWPORT_PADDING_PX, left);
+
+    let top = tourTargetRect.bottom + spacing;
+    if (top + popoverHeight + VIEWPORT_PADDING_PX > viewportHeight) {
+      top = tourTargetRect.top - popoverHeight - spacing;
+    }
+    top = Math.max(VIEWPORT_PADDING_PX, top);
+
+    return { top, left };
+  }, [tourTargetRect]);
 
   const gridSize = GRID_SIZE;
   const dropAreaSize = useMemo(
@@ -178,8 +380,22 @@ export function Canvas() {
     setDropNodeRef(node);
   };
 
-  const selectedPlacement = editor ? placements.find((p) => p.id === editor.id) : null;
+  const selectedPlacementIds = editor?.placementIds ?? [];
+  const selectedPlacement = selectedPlacementIds.length > 0
+    ? placements.find((p) => p.id === selectedPlacementIds[0]) ?? null
+    : null;
   const selectedSize = selectedPlacement ? getPlacementSize(selectedPlacement) : null;
+  const editorPosition = useMemo(() => {
+    if (!editor) return null;
+    const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : Number.POSITIVE_INFINITY;
+    let left = editor.x + EDITOR_OFFSET_PX;
+    if (left + EDITOR_WIDTH_PX + VIEWPORT_PADDING_PX > viewportWidth) {
+      left = editor.x - EDITOR_WIDTH_PX - EDITOR_OFFSET_PX;
+    }
+    const maxLeft = Math.max(VIEWPORT_PADDING_PX, viewportWidth - EDITOR_WIDTH_PX - VIEWPORT_PADDING_PX);
+    left = Math.min(Math.max(VIEWPORT_PADDING_PX, left), maxLeft);
+    return { left, top: Math.max(VIEWPORT_PADDING_PX, editor.y + EDITOR_OFFSET_PX) };
+  }, [editor]);
 
   const invalidPlacementIds = useMemo(() => {
     const invalid = new Set<string>();
@@ -399,7 +615,10 @@ export function Canvas() {
       const drop = computePlacementTargetFromDelta(delta, activeDragRef.current);
       if (!drop) return;
 
-      const collision = hasCollisionAt(drop.size, drop.x, drop.y, activeDragRef.current.placementId);
+      // Use unclamped-to-grid position for live overlap feedback so it flips as soon as boxes intersect.
+      const liveX = Math.max(0, Math.min(drop.rawX, drawerWidth - drop.size.width));
+      const liveY = Math.max(0, Math.min(drop.rawY, drawerLength - drop.size.length));
+      const collision = hasCollisionAt(drop.size, liveX, liveY, activeDragRef.current.placementId);
       setDragStatus({
         placementId: activeDragRef.current.placementId,
         fits: !collision && !drop.isOutOfBounds
@@ -456,7 +675,7 @@ export function Canvas() {
   });
 
   return (
-    <div className="flex-1 bg-[#F6F7F8] relative overflow-hidden flex flex-col">
+    <div className={`flex-1 bg-[#F6F7F8] relative overflow-hidden flex flex-col ${paintMode ? 'cursor-copy' : ''}`}>
       {/* Canvas Area */}
       <div
         ref={scrollContainerRef}
@@ -504,6 +723,7 @@ export function Canvas() {
               height: `${dropAreaSize.heightPx}px`
             }}
             data-testid="canvas-drop-area"
+            data-tour="canvas-drop-zone"
           >
             {showGrid && (
               <div
@@ -527,10 +747,16 @@ export function Canvas() {
                   size={size}
                   gridSize={gridSize}
                   dragStatus={dragStatus}
+                  paintMode={paintMode}
                   isInvalid={invalidPlacementIds.has(placement.id)}
                   onClick={(event) => {
                     event.stopPropagation();
-                    setEditor({ id: placement.id, x: event.clientX, y: event.clientY });
+                    if (paintMode) {
+                      paintPlacement(placement.id);
+                      return;
+                    }
+                    setEditor({ placementIds: [placement.id], x: event.clientX, y: event.clientY });
+                    closePlacementEditor();
                   }}
                 />
               );
@@ -548,7 +774,59 @@ export function Canvas() {
         </div>
       </div>
 
-      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-white/90 backdrop-blur shadow-lg border border-slate-200 rounded-full px-4 py-2 flex items-start gap-5">
+      {!tourActive && showHowTo && (
+        <div
+          data-testid="canvas-how-to"
+          className="absolute top-4 left-4 z-40 w-80 rounded-xl border border-slate-200 bg-white/95 shadow-lg backdrop-blur p-4"
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">How To Start</p>
+              <h3 className="text-sm font-semibold text-[#0B0B0C] mt-1">Build your first layout in under a minute</h3>
+            </div>
+            <button
+              type="button"
+              className="text-xs text-slate-400 hover:text-slate-600"
+              onClick={() => setShowHowTo(false)}
+            >
+              Hide
+            </button>
+          </div>
+          <ol className="mt-3 space-y-1 text-xs text-slate-600">
+            <li>1. Drag a bin from the catalog to the canvas.</li>
+            <li>2. Drop it in the drawer and repeat for more bins.</li>
+            <li>3. Click any bin (or placed-item group) to edit size, color, and label.</li>
+          </ol>
+          <Button
+            size="sm"
+            className="mt-3"
+            onClick={startTour}
+          >
+            Take Tour
+          </Button>
+        </div>
+      )}
+
+      {!tourActive && !showHowTo && (
+        <div
+          data-testid="canvas-how-to-collapsed"
+          className="absolute top-4 left-4 z-40 rounded-full border border-slate-200 bg-white/95 shadow-md backdrop-blur px-3 py-2 flex items-center gap-3"
+        >
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">How To Start</p>
+          <button
+            type="button"
+            className="text-xs font-medium text-[#14476B] hover:text-[#1a5a8a]"
+            onClick={() => setShowHowTo(true)}
+          >
+            Show
+          </button>
+        </div>
+      )}
+
+      <div
+        data-tour="quick-actions-pill"
+        className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-white/90 backdrop-blur shadow-lg border border-slate-200 rounded-2xl px-4 py-2 flex items-start gap-5"
+      >
         <div className="flex flex-col items-center gap-1">
           <span className="text-xs uppercase tracking-wide text-slate-400">History</span>
           <div className="flex items-center gap-1">
@@ -605,33 +883,85 @@ export function Canvas() {
 
         <div className="w-px bg-slate-200 self-stretch my-1" />
 
-        <div className="flex flex-col items-center gap-1">
-          <span className="text-xs uppercase tracking-wide text-slate-400">Layout</span>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="text-[#14476B]"
-            leftIcon={<Sparkles className="h-3 w-3" />}
-            onClick={handleSuggestLayout}
-            disabled={placements.length === 0}
-          >
-            Suggest
-          </Button>
+        <div data-tour="canvas-actions" className="flex flex-col items-center gap-1">
+          <span className="text-xs uppercase tracking-wide text-slate-400">Actions</span>
+          <div className="flex items-center gap-1">
+            <Button
+              data-testid="suggest-layout-button"
+              size="sm"
+              variant="ghost"
+              className="text-[#14476B]"
+              leftIcon={<Sparkles className="h-3 w-3" />}
+              onClick={handleSuggestLayout}
+              disabled={placements.length === 0}
+            >
+              Suggest Layout
+            </Button>
+            <Button
+              data-testid="clear-layout-button"
+              size="sm"
+              variant="ghost"
+              className="text-slate-600"
+              leftIcon={<Trash2 className="h-3 w-3" />}
+              onClick={clearPlacements}
+              disabled={placements.length === 0}
+            >
+              Clear
+            </Button>
+            <Button
+              data-testid="paint-mode-toggle"
+              data-tour="paint-action"
+              size="sm"
+              variant="ghost"
+              className={paintMode ? 'text-[#14476B] bg-[#14476B]/10' : 'text-slate-600'}
+              leftIcon={<PaintBucket className="h-3 w-3" />}
+              onClick={togglePaintMode}
+              disabled={placements.length === 0}
+              aria-label={paintMode ? 'Disable paint mode' : 'Enable paint mode'}
+            >
+              {paintMode ? '' : 'Paint Bins'}
+            </Button>
+            {paintMode && (
+              <select
+                data-testid="paint-color-select"
+                value={paintColorSelection}
+                onChange={(e) => handlePaintColorSelectionChange(e.target.value)}
+                className="w-28 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#14476B]/20"
+              >
+                {PRESET_COLORS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+                <option value={CUSTOM_COLOR_VALUE}>Custom</option>
+              </select>
+            )}
+            {paintMode && paintColorSelection === CUSTOM_COLOR_VALUE && (
+              <input
+                data-testid="paint-color-custom"
+                aria-label="Paint custom color"
+                type="color"
+                value={paintColorDraft}
+                onChange={(e) => handlePaintColorChange(e.target.value)}
+                className="h-7 w-10 rounded-md border border-slate-200 bg-white"
+              />
+            )}
+          </div>
         </div>
       </div>
 
-      {editor && selectedPlacement && selectedSize && (
+      {editor && editorPosition && selectedPlacement && selectedSize && (
         <div
           ref={editorRef}
           data-testid="placement-editor"
           className="fixed z-50 w-60 rounded-xl border border-slate-200 bg-white shadow-xl p-3 text-sm"
-          style={{ left: editor.x + 12, top: editor.y + 12 }}
+          style={{ left: editorPosition.left, top: editorPosition.top }}
         >
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-semibold text-slate-700">Edit Bin</span>
             <button
               type="button"
-              onClick={() => setEditor(null)}
+              onClick={closeEditor}
               className="text-slate-400 hover:text-slate-600 text-xs"
             >
               Close
@@ -658,16 +988,35 @@ export function Canvas() {
               />
             </label>
 
-            <label className="flex items-center justify-between text-xs text-slate-500">
+            <label className="flex flex-col gap-1 text-xs text-slate-500">
               Color
-              <input
+              <select
                 data-testid="placement-color"
-                type="color"
-                value={colorDraft}
-                onChange={(e) => handleColorChange(e.target.value)}
-                className="h-7 w-10 rounded-md border border-slate-200 bg-white"
-              />
+                value={colorSelection}
+                onChange={(e) => handleColorSelectionChange(e.target.value)}
+                className="w-full rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#14476B]/20"
+              >
+                {PRESET_COLORS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+                <option value={CUSTOM_COLOR_VALUE}>Custom</option>
+              </select>
             </label>
+
+            {colorSelection === CUSTOM_COLOR_VALUE && (
+              <label className="flex items-center justify-between text-xs text-slate-500">
+                Custom Color
+                <input
+                  data-testid="placement-color-custom"
+                  type="color"
+                  value={colorDraft}
+                  onChange={(e) => handleColorChange(e.target.value)}
+                  className="h-7 w-10 rounded-md border border-slate-200 bg-white"
+                />
+              </label>
+            )}
 
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs text-slate-500">
@@ -727,12 +1076,88 @@ export function Canvas() {
 
       {toast && (
         <div
-          className={`absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full shadow-md text-sm ${
+          className={`absolute top-4 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-full shadow-md text-sm ${
             toast.type === 'error' ? 'bg-red-100 text-red-700' : 'bg-slate-900 text-white'
           }`}
         >
           {toast.message}
         </div>
+      )}
+
+      {tourActive && tourStepIndex === 3 && (
+        <div
+          data-tour="tour-bin-editor"
+          className="fixed z-[61] w-60 rounded-xl border border-slate-200 bg-white shadow-xl p-3 text-sm pointer-events-none"
+          style={{ right: 24, top: 96 }}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-slate-700">Edit Bin</span>
+            <span className="text-slate-300 text-xs">Close</span>
+          </div>
+          <div className="space-y-2 text-xs text-slate-500">
+            <div className="rounded-md border border-slate-200 px-2 py-1">Label</div>
+            <div className="rounded-md border border-slate-200 px-2 py-1">Color</div>
+            <div className="flex items-center justify-between rounded-md border border-slate-200 px-2 py-1">
+              <span>Width</span>
+              <span>4"</span>
+            </div>
+            <div className="flex items-center justify-between rounded-md border border-slate-200 px-2 py-1">
+              <span>Length</span>
+              <span>6"</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tourActive && activeTourStep && (
+        <>
+          <div className="fixed inset-0 z-[60] bg-slate-900/35 pointer-events-none" />
+          {tourTargetRect && (
+            <div
+              className="fixed z-[61] rounded-lg border-2 border-emerald-500 pointer-events-none"
+              style={{
+                left: `${Math.max(0, tourTargetRect.left - 6)}px`,
+                top: `${Math.max(0, tourTargetRect.top - 6)}px`,
+                width: `${tourTargetRect.width + 12}px`,
+                height: `${tourTargetRect.height + 12}px`,
+                boxShadow: '0 0 0 2px rgba(255,255,255,0.95)'
+              }}
+            />
+          )}
+          <div
+            data-testid="tour-popover"
+            className="fixed z-[62] w-80 rounded-xl border border-slate-200 bg-white shadow-xl p-4"
+            style={{ left: `${tourPopoverPosition.left}px`, top: `${tourPopoverPosition.top}px` }}
+          >
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Guided Tour
+            </p>
+            <h4 className="mt-1 text-sm font-semibold text-[#0B0B0C]">{activeTourStep.title}</h4>
+            <p className="mt-2 text-xs text-slate-600">{activeTourStep.description}</p>
+            <div className="mt-4 flex items-center justify-between">
+              <button
+                type="button"
+                className="text-xs text-slate-500 hover:text-slate-700 disabled:opacity-40"
+                onClick={previousTourStep}
+                disabled={tourStepIndex === 0}
+              >
+                Back
+              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="text-xs text-slate-500 hover:text-slate-700"
+                  onClick={stopTour}
+                >
+                  Skip
+                </button>
+                <Button size="sm" onClick={nextTourStep}>
+                  {tourStepIndex === TOUR_STEPS.length - 1 ? 'Done' : 'Next'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
@@ -743,6 +1168,7 @@ function DraggablePlacement({
   size,
   gridSize,
   dragStatus,
+  paintMode,
   onClick,
   isInvalid
 }: {
@@ -750,6 +1176,7 @@ function DraggablePlacement({
   size: { width: number; length: number; bin?: Bin };
   gridSize: number;
   dragStatus: { placementId: string; fits: boolean } | null;
+  paintMode: boolean;
   onClick: (event: ReactMouseEvent<HTMLDivElement>) => void;
   isInvalid: boolean;
 }) {
@@ -759,21 +1186,31 @@ function DraggablePlacement({
   });
 
   const isActive = isDragging && dragStatus?.placementId === placement.id;
-  const borderColor = isInvalid
-    ? '#dc2626'
+  const actionState: 'idle' | 'valid' | 'invalid' = isInvalid
+    ? 'invalid'
     : isActive
       ? dragStatus?.fits
-        ? '#16a34a'
-        : '#dc2626'
-      : undefined;
+        ? 'valid'
+        : 'invalid'
+      : 'idle';
+  const borderColor = actionState === 'valid' ? '#166534' : actionState === 'invalid' ? '#991b1b' : undefined;
+  const actionRingColor = actionState === 'valid' ? '#16a34a' : actionState === 'invalid' ? '#dc2626' : undefined;
+  const boxShadow = actionRingColor
+    ? `0 0 0 2px rgba(248, 250, 252, 0.95), 0 0 0 4px ${actionRingColor}`
+    : undefined;
 
   const translate = transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined;
+  const backgroundColor = placement.color ?? DEFAULT_BIN_COLOR;
+  const dragAttributes = paintMode ? undefined : attributes;
+  const dragListeners = paintMode ? undefined : listeners;
 
   return (
     <div
       data-testid="placed-bin"
       ref={setNodeRef}
-      className="absolute bg-white border border-slate-300 shadow-sm hover:shadow-md hover:border-[#14476B] hover:z-10 cursor-move transition-all group flex items-center justify-center"
+      className={`absolute bg-white border border-slate-300 shadow-sm hover:shadow-md hover:border-[#14476B] hover:z-10 transition-all group flex items-center justify-center ${
+        paintMode ? 'cursor-copy' : 'cursor-move'
+      }`}
       style={{
         left: `${placement.x * gridSize}px`,
         top: `${placement.y * gridSize}px`,
@@ -784,15 +1221,17 @@ function DraggablePlacement({
         zIndex: isDragging ? 30 : undefined,
         opacity: isDragging ? 0.55 : 1,
         borderColor,
-        backgroundColor: placement.color ?? undefined,
-        color: placement.color ? getContrastText(placement.color) : undefined
+        borderWidth: actionState === 'idle' ? undefined : '2px',
+        boxShadow,
+        backgroundColor,
+        color: getContrastText(backgroundColor)
       }}
       onClick={(event) => {
         if (isDragging) return;
         onClick(event);
       }}
-      {...listeners}
-      {...attributes}
+      {...dragListeners}
+      {...dragAttributes}
     >
       <div className="flex flex-col items-center gap-0.5">
         {placement.label && (
@@ -801,20 +1240,13 @@ function DraggablePlacement({
           </span>
         )}
         <span className="text-xs font-medium leading-none">
-          {size.width}x{size.length}
+          {size.length}" x {size.width}"
+        </span>
+        <span className="text-[10px] font-medium leading-none opacity-90">
+          {getColorLabel(backgroundColor)}
         </span>
       </div>
       <div className="absolute bottom-1 right-1 w-1.5 h-1.5 rounded-full bg-slate-300 opacity-0 group-hover:opacity-100" />
     </div>
   );
-}
-
-function getContrastText(color: string) {
-  const hex = color.replace('#', '');
-  const normalized = hex.length === 3 ? hex.split('').map((c) => c + c).join('') : hex;
-  const r = parseInt(normalized.slice(0, 2), 16);
-  const g = parseInt(normalized.slice(2, 4), 16);
-  const b = parseInt(normalized.slice(4, 6), 16);
-  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  return luminance < 0.5 ? '#f8fafc' : '#0f172a';
 }

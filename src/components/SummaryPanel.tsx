@@ -1,7 +1,11 @@
 import { useMemo, useState, useEffect } from 'react';
+import type { MouseEvent as ReactMouseEvent } from 'react';
 import { Button } from './ui/Button';
 import { Trash2, AlertCircle } from 'lucide-react';
 import { useLayout } from '../context/LayoutContext';
+import { DEFAULT_BIN_COLOR, getColorLabel, normalizeHexColor } from '../utils/colors';
+import { BinSizePreview } from './BinSizePreview';
+import { buildEtsyCartUrl } from '../lib/etsy';
 
 export function SummaryPanel() {
   const {
@@ -11,8 +15,7 @@ export function SummaryPanel() {
     drawerLength,
     setDrawerSize,
     removePlacement,
-    exportState,
-    importState,
+    openPlacementEditor,
     spaceUsedPercent
   } = useLayout();
 
@@ -41,7 +44,7 @@ export function SummaryPanel() {
         placements: typeof placements;
         width: number;
         length: number;
-        colors: Set<string>;
+        color: string;
       }
     >();
 
@@ -50,30 +53,26 @@ export function SummaryPanel() {
       const width = placement.width ?? bin?.width;
       const length = placement.length ?? bin?.length;
       if (width == null || length == null) return;
-      const key = `${width}x${length}`;
+      const color = placement.color ?? DEFAULT_BIN_COLOR;
+      const key = `${width}x${length}-${color}`;
       const existing = groups.get(key);
       if (existing) {
         existing.placements.push(placement);
-        if (placement.color) existing.colors.add(placement.color);
       } else {
         groups.set(key, {
           placements: [placement],
           width,
           length,
-          colors: new Set(placement.color ? [placement.color] : [])
+          color
         });
       }
     });
 
     return Array.from(groups.values())
-      .map((group) => {
-        const colors = Array.from(group.colors);
-        return {
-          ...group,
-          label: `${group.width}x${group.length} Bin`,
-          color: colors.length === 1 ? colors[0] : undefined
-        };
-      })
+      .map((group) => ({
+        ...group,
+        label: `${group.width}x${group.length} Bin`
+      }))
       .sort((a, b) => b.placements.length - a.placements.length);
   }, [uniquePlacements, bins]);
 
@@ -118,6 +117,15 @@ export function SummaryPanel() {
 
     return invalid.size;
   }, [uniquePlacements, bins, drawerWidth, drawerLength]);
+
+  const etsyCartItems = useMemo(
+    () =>
+      placementGroups.map((group) => ({
+        sku: buildPlacedItemSku(group.width, group.length, group.color),
+        quantity: group.placements.length
+      })),
+    [placementGroups]
+  );
 
   return (
     <div className="w-[320px] bg-white border-l border-slate-900/[0.06] flex flex-col h-full">
@@ -188,40 +196,55 @@ export function SummaryPanel() {
           {placementGroups.length === 0 && (
             <p className="text-sm text-slate-400">No bins placed yet.</p>
           )}
-          {placementGroups.map((group) => (
-            <div
-              key={`${group.label}-${group.width}-${group.length}-${group.color ?? 'none'}`}
-              className="flex items-center justify-between group py-2 border-b border-slate-50 last:border-0"
-            >
-              <div className="flex items-center gap-3">
-                <div
-                  className="h-10 w-10 border border-slate-200 text-xs text-slate-500 flex items-center justify-center rounded-md"
-                  style={{ backgroundColor: group.color ?? '#f1f5f9' }}
-                >
-                  {group.width}x{group.length}
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-[#0B0B0C]">
-                    {group.label}
-                  </p>
-                  {group.placements.length > 1 && (
-                    <p className="text-xs text-slate-400">x {group.placements.length} of them</p>
+          {placementGroups.map((group) => {
+            return (
+              <div
+                key={`${group.label}-${group.width}-${group.length}-${group.color}`}
+                data-testid="placed-item-group"
+                className="flex items-center justify-between group py-2 border-b border-slate-50 last:border-0 cursor-pointer"
+                onClick={(event: ReactMouseEvent<HTMLDivElement>) =>
+                  openPlacementEditor(
+                    group.placements.map((placement) => placement.id),
+                    event.clientX,
+                    event.clientY
                   )}
-                </div>
-              </div>
-              <button
-                className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
-                onClick={() => removePlacement(group.placements[0].id)}
               >
-                <Trash2 className="h-4 w-4" />
-              </button>
-            </div>
-          ))}
+                <div className="flex items-center gap-3">
+                  <div className="h-14 w-14 flex items-center justify-center">
+                    <BinSizePreview
+                      dataTestId="placed-item-preview"
+                      width={group.width}
+                      length={group.length}
+                      color={group.color}
+                      size="compact"
+                    />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-[#0B0B0C]">
+                      {buildPlacedItemSku(group.width, group.length, group.color)}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      Color: {getColorLabel(group.color)} · Amount: {group.placements.length}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    removePlacement(group.placements[0].id);
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            );
+          })}
         </div>
       </div>
 
       <div className="p-6 bg-slate-50 border-t border-slate-900/[0.06] space-y-4">
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 gap-3">
           <Button
             variant="secondary"
             size="sm"
@@ -233,7 +256,7 @@ export function SummaryPanel() {
           >
             Export PDF
           </Button>
-          <Button
+          {/* <Button
             variant="secondary"
             size="sm"
             className="w-full text-xs"
@@ -251,8 +274,8 @@ export function SummaryPanel() {
             }}
           >
             Export JSON
-          </Button>
-          <Button
+          </Button> */}
+          {/* <Button
             variant="secondary"
             size="sm"
             className="w-full text-xs"
@@ -271,17 +294,48 @@ export function SummaryPanel() {
                   document.execCommand('copy');
                   document.body.removeChild(ta);
                 }
-                setStatus({ kind: 'info', text: 'Share link copied to clipboard' });
+                setStatus({ kind: 'info', text: 'Link copied to clipboard' });
               } catch (err) {
-                setStatus({ kind: 'error', text: 'Failed to copy share link' });
+                setStatus({ kind: 'error', text: 'Failed to copy link' });
               }
             }}
           >
-            Copy Share Link
+            Copy Link
+          </Button> */}
+          <Button
+            variant="secondary"
+            size="sm"
+            className="w-full text-xs"
+            onClick={() => {
+              const cart = buildEtsyCartUrl(etsyCartItems);
+              if (cart.missingListingId) {
+                setStatus({ kind: 'error', text: 'Set ETSY_LISTING_ID in src/config/etsy.ts' });
+                return;
+              }
+              if (cart.missingSkus.length > 0) {
+                setStatus({
+                  kind: 'error',
+                  text:
+                    cart.missingSkus.length === 1
+                      ? `Missing Etsy variation mapping for ${cart.missingSkus[0]}`
+                      : `Missing Etsy variation mappings for ${cart.missingSkus.length} SKUs`
+                });
+                return;
+              }
+              if (!cart.url) {
+                setStatus({ kind: 'error', text: 'No items to build Etsy cart link' });
+                return;
+              }
+              window.open(cart.url, '_blank', 'noopener,noreferrer');
+              setStatus({ kind: 'info', text: 'Opened Etsy cart link' });
+            }}
+            disabled={etsyCartItems.length === 0}
+          >
+            Open Etsy Cart
           </Button>
         </div>
 
-        <input
+        {/* <input
           id="layout-import"
           type="file"
           accept="application/json"
@@ -300,15 +354,15 @@ export function SummaryPanel() {
             });
             e.target.value = '';
           }}
-        />
-        <Button
+        /> */}
+        {/* <Button
           variant="outline"
           size="sm"
           className="w-full text-xs"
           onClick={() => document.getElementById('layout-import')?.click()}
         >
           Import JSON
-        </Button>
+        </Button> */}
 
         {status && (
           <div
@@ -324,4 +378,13 @@ export function SummaryPanel() {
       </div>
     </div>
   );
+}
+
+function buildPlacedItemSku(width: number, length: number, color: string) {
+  const normalized = normalizeHexColor(color);
+  const colorLabel = getColorLabel(normalized);
+  if (colorLabel === 'Custom') {
+    return `REG-BIN-L${length}xW${width}-Custom-${normalized}`;
+  }
+  return `REG-BIN-L${length}xW${width}-${colorLabel.replace(/\s+/g, '')}`;
 }

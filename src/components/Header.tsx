@@ -1,5 +1,5 @@
 import { Button } from './ui/Button';
-import { ChevronDown, Download, User } from 'lucide-react';
+import { Download, User } from 'lucide-react';
 import { useLayout } from '../context/LayoutContext';
 
 export function Header() {
@@ -24,15 +24,6 @@ export function Header() {
         </span>
       </div>
 
-      {/* Center: Project Selector */}
-      <div className="hidden md:flex items-center gap-2">
-        <button className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-slate-50 hover:bg-slate-100 border border-slate-200 text-sm font-medium text-slate-700 transition-colors">
-          <span>Kitchen Drawer 01</span>
-          <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
-        </button>
-        <span className="text-xs text-slate-400 px-2">Autosaved</span>
-      </div>
-
       {/* Right: Actions */}
       <div className="flex items-center gap-3">
         <Button
@@ -41,7 +32,7 @@ export function Header() {
           leftIcon={<Download className="h-4 w-4" />}
           onClick={handleExportPdf}
         >
-          Export
+          Export PDF
         </Button>
         <div className="w-px h-6 bg-slate-200 mx-1" />
         <button
