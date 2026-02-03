@@ -36,16 +36,26 @@ type PdfDoc = {
   save: (filename: string) => void;
   setFontSize: (size: number) => void;
   setTextColor: (r: number, g: number, b: number) => void;
-  text: (text: string | string[], x: number, y: number, options?: { align?: 'left' | 'center' | 'right' }) => void;
+  text: (
+    text: string | string[],
+    x: number,
+    y: number,
+    options?: { align?: 'left' | 'center' | 'right'; angle?: number }
+  ) => void;
   setFillColor: (r: number, g: number, b: number) => void;
   setDrawColor: (r: number, g: number, b: number) => void;
   setLineWidth: (width: number) => void;
   rect: (x: number, y: number, width: number, height: number, style?: 'S' | 'F' | 'FD') => void;
   line: (x1: number, y1: number, x2: number, y2: number) => void;
+  addImage: (imageData: string, format: 'PNG' | 'JPEG', x: number, y: number, width: number, height: number) => void;
   splitTextToSize: (text: string, maxWidth: number) => string[];
 };
 
 const PAGE_MARGIN_MM = 14;
+const HEADER_LOGO_Y_MM = PAGE_MARGIN_MM;
+const HEADER_LOGO_MAX_WIDTH_MM = 16;
+const HEADER_LOGO_MAX_HEIGHT_MM = 16;
+const HEADER_TEXT_OFFSET_MM = HEADER_LOGO_MAX_WIDTH_MM + 4;
 const HEADER_TITLE_Y_MM = 18;
 const HEADER_META_Y_MM = 24;
 const DRAW_TOP_Y_MM = 34;
@@ -89,13 +99,45 @@ function formatInches(value: number) {
   return value.toFixed(2).replace(/\.?0+$/, '');
 }
 
+async function loadAssetAsDataUrl(
+  assetPath: string
+): Promise<{ dataUrl: string; aspectRatio: number } | null> {
+  try {
+    const response = await fetch(assetPath);
+    if (!response.ok) return null;
+    const blob = await response.blob();
+    const dataUrl = await new Promise<string | null>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : null);
+      reader.onerror = () => reject(new Error(`Failed to read ${assetPath}`));
+      reader.readAsDataURL(blob);
+    });
+    if (!dataUrl) return null;
+    const aspectRatio = await new Promise<number>((resolve) => {
+      const image = new Image();
+      image.onload = () => {
+        if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+          resolve(image.naturalWidth / image.naturalHeight);
+          return;
+        }
+        resolve(1);
+      };
+      image.onerror = () => resolve(1);
+      image.src = dataUrl;
+    });
+    return { dataUrl, aspectRatio };
+  } catch {
+    return null;
+  }
+}
+
 export function buildBinSku(width: number, length: number, color: string) {
   const normalizedColor = normalizeHexColor(color);
   const colorLabel = getColorLabel(normalizedColor);
   if (colorLabel === 'Custom') {
-    return `REG-BIN-L${formatInches(length)}xW${formatInches(width)}-Custom-${normalizedColor}`;
+    return `REG-BIN-${formatInches(length)}x${formatInches(width)}-Custom-${normalizedColor}`;
   }
-  return `REG-BIN-L${formatInches(length)}xW${formatInches(width)}-${colorLabel.replace(/\s+/g, '')}`;
+  return `REG-BIN-${formatInches(length)}x${formatInches(width)}-${colorLabel.replace(/\s+/g, '')}`;
 }
 
 function preparePlacements(placements: Placement[], bins: Bin[]): PreparedPlacement[] {
@@ -154,7 +196,7 @@ function addFooterPageNumbers(doc: PdfDoc, pageWidth: number, pageHeight: number
     doc.setPage(page);
     doc.setFontSize(8);
     doc.setTextColor(...TEXT_MUTED);
-    doc.text(`Page ${page} of ${totalPages}`, pageWidth - PAGE_MARGIN_MM, pageHeight - 6, { align: 'right' });
+    doc.text(`Page ${page} of ${totalPages}`, pageWidth - PAGE_MARGIN_MM, pageHeight - PAGE_MARGIN_MM - 1, { align: 'right' });
   }
 }
 
@@ -162,15 +204,19 @@ export async function exportLayoutToPdf(
   drawerWidth: number,
   drawerLength: number,
   placements: Placement[],
-  bins: Bin[]
+  bins: Bin[],
+  layoutTitle = ''
 ) {
   const { default: jsPDF } = await import('jspdf');
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' }) as unknown as PdfDoc;
+  const logoAsset = await loadAssetAsDataUrl('/ka-logo.png');
 
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const skuTextX = PAGE_MARGIN_MM + 7;
-  const detailsTextX = pageWidth - PAGE_MARGIN_MM - 50;
+  const colorTextX = pageWidth - PAGE_MARGIN_MM - 72;
+  const lengthTextX = pageWidth - PAGE_MARGIN_MM - 34;
+  const widthTextX = pageWidth - PAGE_MARGIN_MM - 20;
   const qtyTextX = pageWidth - PAGE_MARGIN_MM;
   const safeDrawerWidth = Math.max(drawerWidth, 0.001);
   const safeDrawerLength = Math.max(drawerLength, 0.001);
@@ -187,16 +233,39 @@ export async function exportLayoutToPdf(
   const drawHeight = drawerLength * scale;
   const drawX = (pageWidth - drawWidth) / 2;
   const drawY = DRAW_TOP_Y_MM;
+  const headerTextX = logoAsset ? PAGE_MARGIN_MM + HEADER_TEXT_OFFSET_MM : PAGE_MARGIN_MM;
+  const trimmedLayoutTitle = layoutTitle.trim();
+  const detailsY = trimmedLayoutTitle ? HEADER_META_Y_MM + 5 : HEADER_META_Y_MM;
+  const headerTextMaxWidth = Math.max(30, pageWidth - headerTextX - PAGE_MARGIN_MM);
+  const clippedLayoutTitle = trimmedLayoutTitle ? doc.splitTextToSize(trimmedLayoutTitle, headerTextMaxWidth)[0] ?? '' : '';
+
+  if (logoAsset) {
+    const safeAspectRatio = logoAsset.aspectRatio > 0 ? logoAsset.aspectRatio : 1;
+    const logoWidth =
+      safeAspectRatio >= 1
+        ? HEADER_LOGO_MAX_WIDTH_MM
+        : Math.min(HEADER_LOGO_MAX_WIDTH_MM, HEADER_LOGO_MAX_HEIGHT_MM * safeAspectRatio);
+    const logoHeight =
+      safeAspectRatio >= 1
+        ? Math.min(HEADER_LOGO_MAX_HEIGHT_MM, HEADER_LOGO_MAX_WIDTH_MM / safeAspectRatio)
+        : HEADER_LOGO_MAX_HEIGHT_MM;
+    const logoY = HEADER_LOGO_Y_MM + (HEADER_LOGO_MAX_HEIGHT_MM - logoHeight) / 2;
+    doc.addImage(logoAsset.dataUrl, 'PNG', PAGE_MARGIN_MM, logoY, logoWidth, logoHeight);
+  }
 
   doc.setFontSize(16);
   doc.setTextColor(...TEXT_PRIMARY);
-  doc.text('Bin Layout Plan', PAGE_MARGIN_MM, HEADER_TITLE_Y_MM);
+  doc.text('Bin Layout Planner', headerTextX, HEADER_TITLE_Y_MM);
+  if (clippedLayoutTitle) {
+    doc.setFontSize(11);
+    doc.text(clippedLayoutTitle, headerTextX, HEADER_META_Y_MM);
+  }
   doc.setFontSize(10);
   doc.setTextColor(...TEXT_MUTED);
   doc.text(
-    `Drawer: ${formatInches(drawerWidth)}" x ${formatInches(drawerLength)}"`,
-    PAGE_MARGIN_MM,
-    HEADER_META_Y_MM
+    `Drawer: ${formatInches(drawerLength)}" x ${formatInches(drawerWidth)}"`,
+    headerTextX,
+    detailsY
   );
 
   doc.setFillColor(255, 255, 255);
@@ -219,6 +288,12 @@ export async function exportLayoutToPdf(
     doc.setLineWidth(0.5);
     doc.rect(drawX, drawY, drawWidth, drawHeight);
   }
+
+  const lengthLabelX = drawX + 5.5;
+  doc.setFontSize(9);
+  doc.setTextColor(...TEXT_MUTED);
+  doc.text(`Length ${formatInches(drawerLength)}"`, lengthLabelX, drawY + drawHeight / 2, { align: 'center', angle: 90 });
+  doc.text(`Width ${formatInches(drawerWidth)}"`, drawX + drawWidth / 2, drawY + drawHeight + 4, { align: 'center' });
 
   const drawOrder = [...preparedPlacements].sort(
     (a, b) => b.width * b.length - a.width * a.length || a.index - b.index
@@ -265,7 +340,9 @@ export async function exportLayoutToPdf(
   doc.setFontSize(9);
   doc.setTextColor(...TEXT_MUTED);
   doc.text('SKU', skuTextX, cursorY);
-  doc.text('DETAILS', detailsTextX, cursorY);
+  doc.text('COLOR', colorTextX, cursorY);
+  doc.text('LENGTH', lengthTextX, cursorY, { align: 'right' });
+  doc.text('WIDTH', widthTextX, cursorY, { align: 'right' });
   doc.text('QTY', qtyTextX, cursorY, { align: 'right' });
   cursorY += 4;
 
@@ -282,7 +359,7 @@ export async function exportLayoutToPdf(
     doc.setDrawColor(...PLACEMENT_BORDER);
     doc.rect(PAGE_MARGIN_MM, cursorY - 3.3, 4.5, 3.6, 'FD');
 
-    const maxSkuWidth = Math.max(35, detailsTextX - skuTextX - 4);
+    const maxSkuWidth = Math.max(35, colorTextX - skuTextX - 4);
     const clippedSku = doc.splitTextToSize(row.sku, maxSkuWidth)[0] ?? row.sku;
 
     doc.setFontSize(8.5);
@@ -291,7 +368,9 @@ export async function exportLayoutToPdf(
 
     doc.setFontSize(8);
     doc.setTextColor(...TEXT_MUTED);
-    doc.text(`${row.colorLabel} | L${formatInches(row.length)} x W${formatInches(row.width)}`, detailsTextX, cursorY);
+    doc.text(row.colorLabel, colorTextX, cursorY);
+    doc.text(formatInches(row.length), lengthTextX, cursorY, { align: 'right' });
+    doc.text(formatInches(row.width), widthTextX, cursorY, { align: 'right' });
 
     doc.setFontSize(9);
     doc.setTextColor(...TEXT_PRIMARY);

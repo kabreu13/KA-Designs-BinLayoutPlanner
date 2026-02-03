@@ -11,6 +11,7 @@ export function SummaryPanel() {
   const {
     placements,
     bins,
+    layoutTitle,
     drawerWidth,
     drawerLength,
     setDrawerSize,
@@ -136,19 +137,6 @@ export function SummaryPanel() {
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="text-xs text-slate-400 mb-1 block">Width (in)</label>
-            <input
-              type="number"
-              min={6}
-              step={0.25}
-              aria-label="Drawer width"
-              data-testid="drawer-width-input"
-              value={drawerWidth}
-              onChange={(e) => setDrawerSize(Number(e.target.value) || drawerWidth, drawerLength)}
-              className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-[#0B0B0C] focus:outline-none focus:ring-2 focus:ring-[#14476B]/20"
-            />
-          </div>
-          <div>
             <label className="text-xs text-slate-400 mb-1 block">Length (in)</label>
             <input
               type="number"
@@ -158,6 +146,19 @@ export function SummaryPanel() {
               data-testid="drawer-length-input"
               value={drawerLength}
               onChange={(e) => setDrawerSize(drawerWidth, Number(e.target.value) || drawerLength)}
+              className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-[#0B0B0C] focus:outline-none focus:ring-2 focus:ring-[#14476B]/20"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-slate-400 mb-1 block">Width (in)</label>
+            <input
+              type="number"
+              min={6}
+              step={0.25}
+              aria-label="Drawer width"
+              data-testid="drawer-width-input"
+              value={drawerWidth}
+              onChange={(e) => setDrawerSize(Number(e.target.value) || drawerWidth, drawerLength)}
               className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-[#0B0B0C] focus:outline-none focus:ring-2 focus:ring-[#14476B]/20"
             />
           </div>
@@ -251,7 +252,7 @@ export function SummaryPanel() {
             className="w-full text-xs"
             onClick={async () => {
               const { exportLayoutToPdf } = await import('../lib/exporters');
-              return exportLayoutToPdf(drawerWidth, drawerLength, placements, bins);
+              return exportLayoutToPdf(drawerWidth, drawerLength, placements, bins, layoutTitle);
             }}
           >
             Export PDF
@@ -384,7 +385,7 @@ function buildPlacedItemSku(width: number, length: number, color: string) {
   const normalized = normalizeHexColor(color);
   const colorLabel = getColorLabel(normalized);
   if (colorLabel === 'Custom') {
-    return `REG-BIN-L${length}xW${width}-Custom-${normalized}`;
+    return `REG-BIN-${length}x${width}-Custom-${normalized}`;
   }
-  return `REG-BIN-L${length}xW${width}-${colorLabel.replace(/\s+/g, '')}`;
+  return `REG-BIN-${length}x${width}-${colorLabel.replace(/\s+/g, '')}`;
 }

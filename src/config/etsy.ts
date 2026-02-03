@@ -8,5 +8,5 @@ export const ETSY_LISTING_ID = '';
 // Map each SKU to the Etsy variation query params for that listing.
 // Variation param names are typically "variation0", "variation1", etc.
 // Example:
-// 'REG-BIN-L2xW2-White': { variation0: '2x2', variation1: 'White' }
+// 'REG-BIN-2x2-White': { variation0: '2x2', variation1: 'White' }
 export const ETSY_VARIATIONS_BY_SKU: Record<string, Record<string, string>> = {};

@@ -26,6 +26,7 @@ export interface Placement {
 }
 
 interface LayoutState {
+  layoutTitle: string;
   drawerWidth: number;
   drawerLength: number;
   placements: Placement[];
@@ -57,6 +58,7 @@ export interface SuggestLayoutResult {
 
 interface LayoutContextValue {
   bins: Bin[];
+  layoutTitle: string;
   placements: Placement[];
   drawerWidth: number;
   drawerLength: number;
@@ -70,6 +72,7 @@ interface LayoutContextValue {
   activePlacementEditor: { placementIds: string[]; x: number; y: number } | null;
   openPlacementEditor: (placementIds: string[], x: number, y: number) => void;
   closePlacementEditor: () => void;
+  setLayoutTitle: (title: string) => void;
   setDrawerSize: (width: number, length: number) => void;
   undo: () => void;
   redo: () => void;
@@ -103,6 +106,7 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
   };
 
   const initial: LayoutState = {
+    layoutTitle: '',
     drawerWidth: 24,
     drawerLength: 18,
     placements: [],
@@ -130,11 +134,12 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return;
     try {
-      const parsed = JSON.parse(raw) as LayoutState;
+      const parsed = JSON.parse(raw) as Partial<LayoutState>;
       if (parsed.drawerWidth && parsed.drawerLength && Array.isArray(parsed.placements)) {
         setHistory({
           past: [],
           present: {
+            layoutTitle: typeof parsed.layoutTitle === 'string' ? parsed.layoutTitle : '',
             drawerWidth: parsed.drawerWidth,
             drawerLength: parsed.drawerLength,
             placements: normalizePlacements(parsed.placements),
@@ -155,11 +160,12 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
     if (!encoded) return;
     try {
       const json = atob(decodeURIComponent(encoded));
-      const parsed = JSON.parse(json) as LayoutState;
+      const parsed = JSON.parse(json) as Partial<LayoutState>;
       if (parsed.drawerWidth && parsed.drawerLength && Array.isArray(parsed.placements)) {
         setHistory({
           past: [],
           present: {
+            layoutTitle: typeof parsed.layoutTitle === 'string' ? parsed.layoutTitle : '',
             drawerWidth: parsed.drawerWidth,
             drawerLength: parsed.drawerLength,
             placements: normalizePlacements(parsed.placements),
@@ -494,6 +500,13 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
     pushState({ ...state, drawerWidth: width, drawerLength: length });
   };
 
+  const setLayoutTitle = (title: string) => {
+    setHistory((prev) => ({
+      ...prev,
+      present: { ...prev.present, layoutTitle: title }
+    }));
+  };
+
   const undo = () =>
     setHistory((prev) =>
       prev.past.length === 0
@@ -520,6 +533,7 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
   const importState = (incoming: LayoutState) => {
     if (!incoming.drawerWidth || !incoming.drawerLength || !Array.isArray(incoming.placements)) return false;
     pushState({
+      layoutTitle: typeof incoming.layoutTitle === 'string' ? incoming.layoutTitle : '',
       drawerWidth: incoming.drawerWidth,
       drawerLength: incoming.drawerLength,
       placements: normalizePlacements(incoming.placements),
@@ -563,6 +577,7 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
 
   const value: LayoutContextValue = {
     bins: BINS,
+    layoutTitle: state.layoutTitle,
     placements: state.placements,
     drawerWidth: state.drawerWidth,
     drawerLength: state.drawerLength,
@@ -576,6 +591,7 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
     activePlacementEditor,
     openPlacementEditor,
     closePlacementEditor,
+    setLayoutTitle,
     setDrawerSize,
     undo,
     redo,
