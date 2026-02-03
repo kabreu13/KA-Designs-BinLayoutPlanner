@@ -180,6 +180,13 @@ export async function exportLayoutToPdf(
   const drawerArea = drawerWidth * drawerLength;
   const usedArea = preparedPlacements.reduce((sum, item) => sum + item.width * item.length, 0);
   const usedPercent = drawerArea > 0 ? Math.min(100, (usedArea / drawerArea) * 100) : 0;
+  const maxDrawWidth = pageWidth - PAGE_MARGIN_MM * 2;
+  const maxDrawHeight = pageHeight * DRAW_MAX_HEIGHT_RATIO;
+  const scale = Math.min(maxDrawWidth / safeDrawerWidth, maxDrawHeight / safeDrawerLength);
+  const drawWidth = drawerWidth * scale;
+  const drawHeight = drawerLength * scale;
+  const drawX = (pageWidth - drawWidth) / 2;
+  const drawY = DRAW_TOP_Y_MM;
 
   doc.setFontSize(16);
   doc.setTextColor(...TEXT_PRIMARY);
@@ -191,14 +198,6 @@ export async function exportLayoutToPdf(
     PAGE_MARGIN_MM,
     HEADER_META_Y_MM
   );
-
-  const maxDrawWidth = pageWidth - PAGE_MARGIN_MM * 2;
-  const maxDrawHeight = pageHeight * DRAW_MAX_HEIGHT_RATIO;
-  const scale = Math.min(maxDrawWidth / safeDrawerWidth, maxDrawHeight / safeDrawerLength);
-  const drawWidth = drawerWidth * scale;
-  const drawHeight = drawerLength * scale;
-  const drawX = (pageWidth - drawWidth) / 2;
-  const drawY = DRAW_TOP_Y_MM;
 
   doc.setFillColor(255, 255, 255);
   doc.setDrawColor(...BORDER_COLOR);
@@ -238,12 +237,6 @@ export async function exportLayoutToPdf(
     doc.setDrawColor(...PLACEMENT_BORDER);
     doc.setLineWidth(0.25);
     doc.rect(x, y, width, length, 'FD');
-
-    if (width >= 7 && length >= 6) {
-      doc.setTextColor(...textColor);
-      doc.setFontSize(12);
-      doc.text(`#${item.index}`, x + 1.2, y + 4.2);
-    }
 
     if (width >= 12 && length >= 8) {
       doc.setTextColor(...textColor);
