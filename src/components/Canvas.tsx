@@ -65,6 +65,7 @@ export function Canvas() {
     movePlacement,
     updatePlacement,
     updatePlacements,
+    removePlacement,
     clearPlacements,
     activePlacementEditor,
     closePlacementEditor,
@@ -1070,6 +1071,20 @@ export function Canvas() {
               </div>
             </div>
             <p className="text-xs text-slate-400">Sizes adjust in {SIZE_STEP}" steps (min {MIN_BIN_SIZE}", max {MAX_BIN_SIZE}").</p>
+            <Button
+              data-testid="delete-bin-button"
+              size="sm"
+              variant="ghost"
+              className="w-full justify-center text-red-600 hover:bg-red-50"
+              aria-label="Delete bin"
+              leftIcon={<Trash2 className="h-3 w-3" />}
+              onClick={() => {
+                removePlacement(selectedPlacement.id);
+                closeEditor();
+              }}
+            >
+              Delete Bin
+            </Button>
           </div>
         </div>
       )}

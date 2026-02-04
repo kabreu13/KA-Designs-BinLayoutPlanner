@@ -54,7 +54,7 @@ export function SummaryPanel() {
       const width = placement.width ?? bin?.width;
       const length = placement.length ?? bin?.length;
       if (width == null || length == null) return;
-      const color = placement.color ?? DEFAULT_BIN_COLOR;
+      const color = normalizeHexColor(placement.color ?? DEFAULT_BIN_COLOR);
       const key = `${width}x${length}-${color}`;
       const existing = groups.get(key);
       if (existing) {
@@ -230,7 +230,8 @@ export function SummaryPanel() {
                   </div>
                 </div>
                 <button
-                  className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
+                  aria-label="Delete bin"
+                  className="text-slate-300 hover:text-red-500 transition-colors"
                   onClick={(event) => {
                     event.stopPropagation();
                     removePlacement(group.placements[0].id);

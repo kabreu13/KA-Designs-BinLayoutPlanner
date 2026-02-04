@@ -30,7 +30,6 @@ interface LayoutState {
   drawerWidth: number;
   drawerLength: number;
   placements: Placement[];
-  usage: Record<string, number>;
 }
 
 interface HistoryState {
@@ -62,7 +61,6 @@ interface LayoutContextValue {
   placements: Placement[];
   drawerWidth: number;
   drawerLength: number;
-  binUsage: Record<string, number>;
   addPlacement: (binId: string, x?: number, y?: number) => PlacementResult;
   movePlacement: (placementId: string, x: number, y: number) => PlacementResult;
   updatePlacement: (placementId: string, updates: Partial<Pick<Placement, 'width' | 'length' | 'color' | 'label'>>) => PlacementResult;
@@ -86,6 +84,22 @@ interface LayoutContextValue {
 
 const LayoutContext = createContext<LayoutContextValue | undefined>(undefined);
 const STORAGE_KEY = 'bin-layout-state';
+const MIN_DRAWER_DIMENSION = 0.25;
+
+const normalizeDrawerDimension = (value: unknown) => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  const roundedToQuarterInch = Math.round(value * 4) / 4;
+  if (roundedToQuarterInch < MIN_DRAWER_DIMENSION) return null;
+  return roundedToQuarterInch;
+};
+
+const normalizeDrawerSize = (width: unknown, length: unknown) => {
+  const normalizedWidth = normalizeDrawerDimension(width);
+  const normalizedLength = normalizeDrawerDimension(length);
+  if (normalizedWidth == null || normalizedLength == null) return null;
+  return { width: normalizedWidth, length: normalizedLength };
+};
+
 const withDefaultColor = (placement: Placement): Placement => ({
   ...placement,
   color: normalizeHexColor(placement.color ?? DEFAULT_BIN_COLOR)
@@ -109,8 +123,7 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
     layoutTitle: '',
     drawerWidth: 24,
     drawerLength: 18,
-    placements: [],
-    usage: {}
+    placements: []
   };
 
   const [history, setHistory] = useState<HistoryState>(() => ({
@@ -135,15 +148,15 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
     if (!raw) return;
     try {
       const parsed = JSON.parse(raw) as Partial<LayoutState>;
-      if (parsed.drawerWidth && parsed.drawerLength && Array.isArray(parsed.placements)) {
+      const normalizedSize = normalizeDrawerSize(parsed.drawerWidth, parsed.drawerLength);
+      if (normalizedSize && Array.isArray(parsed.placements)) {
         setHistory({
           past: [],
           present: {
             layoutTitle: typeof parsed.layoutTitle === 'string' ? parsed.layoutTitle : '',
-            drawerWidth: parsed.drawerWidth,
-            drawerLength: parsed.drawerLength,
-            placements: normalizePlacements(parsed.placements),
-            usage: parsed.usage ?? {}
+            drawerWidth: normalizedSize.width,
+            drawerLength: normalizedSize.length,
+            placements: normalizePlacements(parsed.placements)
           },
           future: []
         });
@@ -161,15 +174,15 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
     try {
       const json = atob(decodeURIComponent(encoded));
       const parsed = JSON.parse(json) as Partial<LayoutState>;
-      if (parsed.drawerWidth && parsed.drawerLength && Array.isArray(parsed.placements)) {
+      const normalizedSize = normalizeDrawerSize(parsed.drawerWidth, parsed.drawerLength);
+      if (normalizedSize && Array.isArray(parsed.placements)) {
         setHistory({
           past: [],
           present: {
             layoutTitle: typeof parsed.layoutTitle === 'string' ? parsed.layoutTitle : '',
-            drawerWidth: parsed.drawerWidth,
-            drawerLength: parsed.drawerLength,
-            placements: normalizePlacements(parsed.placements),
-            usage: parsed.usage ?? {}
+            drawerWidth: normalizedSize.width,
+            drawerLength: normalizedSize.length,
+            placements: normalizePlacements(parsed.placements)
           },
           future: []
         });
@@ -258,8 +271,7 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
           length: bin.length,
           color: DEFAULT_BIN_COLOR
         }
-      ],
-      usage: { ...state.usage, [binId]: (state.usage[binId] ?? 0) + 1 }
+      ]
     });
     return { status, position: target };
   };
@@ -497,7 +509,10 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
   };
 
   const setDrawerSize = (width: number, length: number) => {
-    pushState({ ...state, drawerWidth: width, drawerLength: length });
+    const normalizedSize = normalizeDrawerSize(width, length);
+    if (!normalizedSize) return;
+    if (normalizedSize.width === state.drawerWidth && normalizedSize.length === state.drawerLength) return;
+    pushState({ ...state, drawerWidth: normalizedSize.width, drawerLength: normalizedSize.length });
   };
 
   const setLayoutTitle = (title: string) => {
@@ -531,13 +546,13 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
 
   const exportState = () => state;
   const importState = (incoming: LayoutState) => {
-    if (!incoming.drawerWidth || !incoming.drawerLength || !Array.isArray(incoming.placements)) return false;
+    const normalizedSize = normalizeDrawerSize(incoming.drawerWidth, incoming.drawerLength);
+    if (!normalizedSize || !Array.isArray(incoming.placements)) return false;
     pushState({
       layoutTitle: typeof incoming.layoutTitle === 'string' ? incoming.layoutTitle : '',
-      drawerWidth: incoming.drawerWidth,
-      drawerLength: incoming.drawerLength,
-      placements: normalizePlacements(incoming.placements),
-      usage: incoming.usage ?? state.usage
+      drawerWidth: normalizedSize.width,
+      drawerLength: normalizedSize.length,
+      placements: normalizePlacements(incoming.placements)
     });
     return true;
   };
@@ -581,7 +596,6 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
     placements: state.placements,
     drawerWidth: state.drawerWidth,
     drawerLength: state.drawerLength,
-    binUsage: state.usage,
     addPlacement,
     movePlacement,
     updatePlacement,
