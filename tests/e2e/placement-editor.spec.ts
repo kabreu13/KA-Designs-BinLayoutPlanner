@@ -1,6 +1,6 @@
 import './coverage';
 import { test, expect } from '@playwright/test';
-import { ensureCatalogExpanded } from './helpers';
+import { ensureCatalogExpanded, getStoredPlacements } from './helpers';
 
 test('placed bin editor updates label, color, and size', async ({ page }) => {
   await page.goto('/');
@@ -16,7 +16,8 @@ test('placed bin editor updates label, color, and size', async ({ page }) => {
 
   const labelInput = page.getByTestId('placement-label');
   await labelInput.fill('Spice');
-  await labelInput.press('Enter');
+  await labelInput.blur();
+  await expect.poll(async () => (await getStoredPlacements(page))[0]?.label).toBe('Spice');
   await expect(placed).toContainText('Spice');
 
   const colorInput = page.getByTestId('placement-color');

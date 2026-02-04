@@ -27,7 +27,16 @@ export const clickBinBySize = async (page: Page, size: `${number}x${number}`) =>
   await card.click();
 };
 
-export type StoredPlacement = { id: string; binId: string; x: number; y: number };
+export type StoredPlacement = {
+  id: string;
+  binId: string;
+  x: number;
+  y: number;
+  width?: number;
+  length?: number;
+  color?: string;
+  label?: string;
+};
 
 export const getStoredPlacements = async (page: Page): Promise<StoredPlacement[]> =>
   page.evaluate(() => {
