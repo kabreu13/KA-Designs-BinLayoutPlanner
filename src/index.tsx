@@ -1,6 +1,7 @@
 import './index.css';
 import React from "react";
 import { render } from "react-dom";
+import { injectSpeedInsights } from "@vercel/speed-insights";
 import { App } from "./App";
 
 const GA_MEASUREMENT_ID = "G-NLS0H7PMCY";
@@ -45,5 +46,6 @@ const initGoogleAnalytics = () => {
 };
 
 initGoogleAnalytics();
+injectSpeedInsights();
 
 render(<App />, document.getElementById("root"));
