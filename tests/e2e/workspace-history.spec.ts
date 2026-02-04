@@ -1,5 +1,6 @@
 import './coverage';
 import { test, expect } from '@playwright/test';
+import { ensureCatalogExpanded } from './helpers';
 
 const BIN_CARD = '[data-testid="bin-card"]';
 const PLACED = '[data-testid="placed-bin"]';
@@ -12,6 +13,7 @@ const getPlacements = async (page: import('@playwright/test').Page) =>
 
 test('undo and redo update placements', async ({ page }) => {
   await page.goto('/');
+  await ensureCatalogExpanded(page);
 
   const binCard = page.locator(BIN_CARD).first();
   await binCard.waitFor({ state: 'visible' });
@@ -32,6 +34,7 @@ test('undo and redo update placements', async ({ page }) => {
 
 test('keyboard shortcuts undo and redo', async ({ page }) => {
   await page.goto('/');
+  await ensureCatalogExpanded(page);
 
   const binCard = page.locator(BIN_CARD).first();
   await binCard.waitFor({ state: 'visible' });

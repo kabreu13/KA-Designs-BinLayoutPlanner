@@ -1,5 +1,6 @@
 import './coverage';
 import { test, expect } from '@playwright/test';
+import { ensureCatalogExpanded } from './helpers';
 
 const FIRST_BIN = '[data-testid="bin-card"]';
 const CANVAS = '[data-testid="canvas-drop-area"]';
@@ -7,6 +8,7 @@ const PLACED = '[data-testid="placed-bin"]';
 
 test('dragging a placed bin moves by the exact mouse delta', async ({ page }) => {
   await page.goto('/');
+  await ensureCatalogExpanded(page);
 
   const bin = page.locator(FIRST_BIN).first();
   const canvas = page.locator(CANVAS);

@@ -17,7 +17,7 @@ test('grid toggle shows/hides overlay', async ({ page }) => {
 test('snap input updates value', async ({ page }) => {
   await page.goto('/');
 
-  const snapInput = page.getByLabel('Snap distance');
+  const snapInput = page.getByLabel('Snap to grid');
   await expect(snapInput).toHaveValue('1');
   await snapInput.fill('0.5');
   await expect(snapInput).toHaveValue('0.5');

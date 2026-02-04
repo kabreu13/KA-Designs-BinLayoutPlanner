@@ -1,6 +1,7 @@
 import './coverage';
 import { test, expect } from '@playwright/test';
 import { BINS } from '../../src/data/bins';
+import { clickBinBySize, ensureCatalogExpanded } from './helpers';
 
 const FIRST_BIN_CARD = '[data-testid="bin-card"]';
 const CANVAS = '[data-testid="canvas-drop-area"]';
@@ -37,6 +38,7 @@ const getPlacements = async (page: import('@playwright/test').Page) =>
 
 test('dragging an existing bin onto another does not overlap', async ({ page }) => {
   await page.goto('/');
+  await ensureCatalogExpanded(page);
 
   const binCard = page.locator(FIRST_BIN_CARD).first();
   const canvas = page.locator(CANVAS);
@@ -69,6 +71,7 @@ test('dragging an existing bin onto another does not overlap', async ({ page }) 
 
 test('dropping a new bin onto an occupied area auto-fits without overlap', async ({ page }) => {
   await page.goto('/');
+  await ensureCatalogExpanded(page);
 
   const binCard = page.locator(FIRST_BIN_CARD).first();
   const canvas = page.locator(CANVAS);
@@ -98,13 +101,10 @@ test('dropping a new bin onto an occupied area auto-fits without overlap', async
 
 test('interference checks work with different bin sizes', async ({ page }) => {
   await page.goto('/');
+  await ensureCatalogExpanded(page);
 
-  const search = page.getByPlaceholder('Search sizes...');
-  await search.fill('8x10');
-  await page.locator(FIRST_BIN_CARD).first().click();
-
-  await search.fill('2x2');
-  await page.locator(FIRST_BIN_CARD).first().click();
+  await clickBinBySize(page, '8x8');
+  await clickBinBySize(page, '2x2');
 
   await expect(page.locator(PLACED)).toHaveCount(2);
   const placements = (await getPlacements(page)) as Placement[];

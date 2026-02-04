@@ -1,8 +1,10 @@
 import './coverage';
 import { test, expect } from '@playwright/test';
+import { ensureCatalogExpanded } from './helpers';
 
 test('placed bin editor updates label, color, and size', async ({ page }) => {
   await page.goto('/');
+  await ensureCatalogExpanded(page);
 
   await page.locator('[data-testid="bin-card"]').first().click();
   const placed = page.getByTestId('placed-bin').first();
@@ -18,8 +20,8 @@ test('placed bin editor updates label, color, and size', async ({ page }) => {
   await expect(placed).toContainText('Spice');
 
   const colorInput = page.getByTestId('placement-color');
-  await colorInput.fill('#ff0000');
-  await expect(placed).toHaveCSS('background-color', 'rgb(255, 0, 0)');
+  await colorInput.selectOption('#dc2626');
+  await expect(placed).toHaveCSS('background-color', 'rgb(220, 38, 38)');
 
   await page.getByTestId('size-width-increase').click();
   await page.getByTestId('size-length-increase').click();
@@ -35,6 +37,7 @@ test('placed bin editor updates label, color, and size', async ({ page }) => {
 
 test('resize allows out-of-bounds bins with red border', async ({ page }) => {
   await page.goto('/');
+  await ensureCatalogExpanded(page);
 
   await page.getByTestId('drawer-width-input').fill('4');
   await page.getByTestId('drawer-length-input').fill('4');
@@ -55,7 +58,7 @@ test('resize allows out-of-bounds bins with red border', async ({ page }) => {
     return placements[0]?.width;
   }).toBe(6);
 
-  await expect(placed).toHaveCSS('border-color', 'rgb(220, 38, 38)');
+  await expect(placed).toHaveCSS('border-color', 'rgb(153, 27, 27)');
 });
 
 test('resize allows overlapping bins with red borders', async ({ page }) => {
@@ -91,6 +94,6 @@ test('resize allows overlapping bins with red borders', async ({ page }) => {
     return resized?.width;
   }).toBe(6);
 
-  await expect(placed.first()).toHaveCSS('border-color', 'rgb(220, 38, 38)');
-  await expect(placed.nth(1)).toHaveCSS('border-color', 'rgb(220, 38, 38)');
+  await expect(placed.first()).toHaveCSS('border-color', 'rgb(153, 27, 27)');
+  await expect(placed.nth(1)).toHaveCSS('border-color', 'rgb(153, 27, 27)');
 });

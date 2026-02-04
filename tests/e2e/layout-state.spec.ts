@@ -1,11 +1,18 @@
 import './coverage';
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 
 const BIN_CARD = '[data-testid="bin-card"]';
 const PLACED = '[data-testid="placed-bin"]';
+const acceptShareLayoutDialog = (page: Page) => {
+  page.once('dialog', (dialog) => dialog.accept());
+};
+const openFirstCatalogGroup = async (page: Page) => {
+  await page.locator('[data-testid^="catalog-group-toggle-"]').first().click();
+};
 
 test('loads state from localStorage on refresh', async ({ page }) => {
   await page.goto('/');
+  await openFirstCatalogGroup(page);
   await page.locator(BIN_CARD).first().click();
   await expect(page.locator(PLACED)).toHaveCount(1);
 
@@ -21,6 +28,7 @@ test('loads state from share link query param', async ({ page }) => {
     usage: { 'bin-2x2': 1 }
   };
   const encoded = encodeURIComponent(Buffer.from(JSON.stringify(state)).toString('base64'));
+  acceptShareLayoutDialog(page);
   await page.goto(`/?layout=${encoded}`);
 
   await expect(page.locator(PLACED)).toHaveCount(1);
@@ -45,6 +53,7 @@ test('share link overrides localStorage state', async ({ page }) => {
   }, localState);
 
   const encoded = encodeURIComponent(Buffer.from(JSON.stringify(paramState)).toString('base64'));
+  acceptShareLayoutDialog(page);
   await page.goto(`/?layout=${encoded}`);
 
   const placements = await page.evaluate(() => {
@@ -61,5 +70,6 @@ test('invalid localStorage JSON does not break load', async ({ page }) => {
   });
 
   await page.goto('/');
+  await openFirstCatalogGroup(page);
   await expect(page.locator(BIN_CARD).first()).toBeVisible();
 });

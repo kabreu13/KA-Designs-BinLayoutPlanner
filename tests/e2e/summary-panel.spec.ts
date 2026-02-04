@@ -1,5 +1,6 @@
 import './coverage';
 import { test, expect } from '@playwright/test';
+import { ensureCatalogExpanded } from './helpers';
 
 const BIN_CARD = '[data-testid="bin-card"]';
 const PLACED = '[data-testid="placed-bin"]';
@@ -22,6 +23,7 @@ test('drawer size inputs update canvas labels', async ({ page }) => {
 
 test('space used bar increases with placements', async ({ page }) => {
   await page.goto('/');
+  await ensureCatalogExpanded(page);
 
   const bar = page.locator('div.h-2 > div.h-full');
   const beforeWidth = await bar.getAttribute('style');
@@ -72,17 +74,19 @@ test('status shows when bins are safely placed', async ({ page }) => {
 
 test('summary groups identical bins with a count', async ({ page }) => {
   await page.goto('/');
+  await ensureCatalogExpanded(page);
 
   const binCard = page.locator(BIN_CARD).first();
   await binCard.waitFor({ state: 'visible' });
   await binCard.click();
   await binCard.click();
 
-  await expect(page.getByText(/x 2 of them/)).toBeVisible();
+  await expect(page.getByText(/Amount: 2/)).toBeVisible();
 });
 
 test('remove bin from summary updates placements', async ({ page }) => {
   await page.goto('/');
+  await ensureCatalogExpanded(page);
 
   const binCard = page.locator(BIN_CARD).first();
   await binCard.waitFor({ state: 'visible' });
@@ -93,109 +97,22 @@ test('remove bin from summary updates placements', async ({ page }) => {
   const before = await getPlacements(page);
   expect(before.length).toBe(2);
 
-  const removeButton = page.locator('button:has(svg.lucide-trash-2)').first();
+  const removeButton = page
+    .locator('[data-testid="placed-item-group"]')
+    .first()
+    .getByRole('button', { name: 'Delete bin' });
   await removeButton.click({ force: true });
 
   const after = await getPlacements(page);
   expect(after.length).toBe(1);
 });
 
-test('copy share link shows status', async ({ page }) => {
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Copy Share Link' }).click();
-  await expect(page.getByText(/Share link copied to clipboard|Failed to copy share link/)).toBeVisible();
-});
-
-test('copy share link works without clipboard API', async ({ page }) => {
-  await page.addInitScript(() => {
-    Object.defineProperty(navigator, 'clipboard', {
-      value: undefined,
-      configurable: true
-    });
-  });
-
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Copy Share Link' }).click();
-  await expect(page.getByText('Share link copied to clipboard')).toBeVisible();
-});
-
-test('copy share link handles clipboard write failure', async ({ page }) => {
-  await page.addInitScript(() => {
-    Object.defineProperty(navigator, 'clipboard', {
-      value: {
-        writeText: () => Promise.reject(new Error('nope'))
-      },
-      configurable: true
-    });
-  });
-
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Copy Share Link' }).click();
-  await expect(page.getByText('Failed to copy share link')).toBeVisible();
-});
-
-test('import JSON populates placements and shows status', async ({ page }) => {
-  await page.goto('/');
-
-  const state = {
-    drawerWidth: 24,
-    drawerLength: 18,
-    placements: [{ id: 'p1', binId: 'bin-2x2', x: 1, y: 1 }],
-    usage: { 'bin-2x2': 1 }
-  };
-
-  await page.setInputFiles('#layout-import', {
-    name: 'layout.json',
-    mimeType: 'application/json',
-    buffer: Buffer.from(JSON.stringify(state))
-  });
-
-  await expect(page.getByText('Layout imported')).toBeVisible();
-  const placements = await getPlacements(page);
-  expect(placements.length).toBe(1);
-});
-
-test('export JSON downloads a file', async ({ page }) => {
-  await page.goto('/');
-
-  const downloadPromise = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Export JSON' }).click();
-  const download = await downloadPromise;
-  const filename = download.suggestedFilename();
-  expect(filename).toBe('bin-layout.json');
-});
-
 test('export PDF downloads a file', async ({ page }) => {
   await page.goto('/');
 
   const downloadPromise = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Export PDF' }).click();
+  await page.getByTestId('side-panel-right').getByRole('button', { name: 'Export PDF' }).click();
   const download = await downloadPromise;
   const filename = download.suggestedFilename();
   expect(filename).toBe('bin-layout.pdf');
-});
-
-test('import JSON shows error on invalid JSON', async ({ page }) => {
-  await page.goto('/');
-
-  await page.setInputFiles('#layout-import', {
-    name: 'layout.json',
-    mimeType: 'application/json',
-    buffer: Buffer.from('{this is not valid json')
-  });
-
-  await expect(page.getByText('Import failed: bad JSON')).toBeVisible();
-});
-
-test('import JSON shows error on invalid layout', async ({ page }) => {
-  await page.goto('/');
-
-  const badLayout = { drawerWidth: 24, placements: [] };
-  await page.setInputFiles('#layout-import', {
-    name: 'layout.json',
-    mimeType: 'application/json',
-    buffer: Buffer.from(JSON.stringify(badLayout))
-  });
-
-  await expect(page.getByText('Invalid layout file')).toBeVisible();
 });

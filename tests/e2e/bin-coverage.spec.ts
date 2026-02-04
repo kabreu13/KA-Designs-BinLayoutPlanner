@@ -1,6 +1,7 @@
 import './coverage';
 import { test, expect } from '@playwright/test';
 import { BINS } from '../../src/data/bins';
+import { clickBinBySize, ensureCatalogExpanded } from './helpers';
 
 const BIN_CARD = '[data-testid="bin-card"]';
 const PLACED = '[data-testid="placed-bin"]';
@@ -20,31 +21,27 @@ const setDrawerSize = async (page: import('@playwright/test').Page, width: numbe
   await page.getByTestId('drawer-length-input').fill(String(length));
 };
 
-const searchAndClickBin = async (page: import('@playwright/test').Page, query: string) => {
-  const search = page.getByPlaceholder('Search sizes...');
-  await search.fill(query);
-  await page.locator(BIN_CARD).first().click();
-};
-
 test('blocked placement when drawer is full', async ({ page }) => {
   await page.goto('/');
+  await ensureCatalogExpanded(page);
 
   await setDrawerSize(page, 6, 6);
-  await searchAndClickBin(page, '6x6');
+  await clickBinBySize(page, '6x6');
 
   const placementsAfterFirst = (await getPlacements(page)) as Placement[];
   expect(placementsAfterFirst.length).toBe(1);
 
-  await searchAndClickBin(page, '2x2');
+  await clickBinBySize(page, '2x2');
   const placementsAfterSecond = (await getPlacements(page)) as Placement[];
   expect(placementsAfterSecond.length).toBe(1);
 });
 
 test('clamps to drawer edges when dragged beyond bounds', async ({ page }) => {
   await page.goto('/');
+  await ensureCatalogExpanded(page);
 
   await setDrawerSize(page, 6, 6);
-  await searchAndClickBin(page, '4x4');
+  await clickBinBySize(page, '4x4');
 
   const placed = page.locator(PLACED).first();
   await placed.waitFor({ state: 'visible' });
@@ -72,6 +69,7 @@ test('clamps to drawer edges when dragged beyond bounds', async ({ page }) => {
 
 test('drag delta stays consistent at 1x scale', async ({ page }) => {
   await page.goto('/');
+  await ensureCatalogExpanded(page);
 
   await page.locator(BIN_CARD).first().click();
   const placed = page.locator(PLACED).first();
@@ -108,8 +106,9 @@ test('drag delta stays consistent at 1x scale', async ({ page }) => {
 
 test('drag delta is consistent with snap 1 and snap 0.5', async ({ page }) => {
   await page.goto('/');
+  await ensureCatalogExpanded(page);
 
-  const snapInput = page.getByLabel('Snap distance');
+  const snapInput = page.getByLabel('Snap to grid');
   await page.locator(BIN_CARD).first().click();
   const placed = page.locator(PLACED).first();
   await placed.waitFor({ state: 'visible' });
@@ -152,9 +151,10 @@ test('drag delta is consistent with snap 1 and snap 0.5', async ({ page }) => {
 
 test('snap pulls bins to drawer borders', async ({ page }) => {
   await page.goto('/');
+  await ensureCatalogExpanded(page);
 
   await setDrawerSize(page, 6, 6);
-  const snapInput = page.getByLabel('Snap distance');
+  const snapInput = page.getByLabel('Snap to grid');
   await snapInput.fill('2');
 
   await page.locator(BIN_CARD).first().click();
