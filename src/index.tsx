@@ -22,7 +22,13 @@ const initGoogleAnalytics = () => {
   const gaWindow = window as Window & {
     dataLayer?: unknown[];
     gtag?: (...args: unknown[]) => void;
+    __gaInitialized?: boolean;
   };
+  if (gaWindow.__gaInitialized) {
+    return;
+  }
+  gaWindow.__gaInitialized = true;
+
   gaWindow.dataLayer = gaWindow.dataLayer || [];
 
   gaWindow.gtag = (...args: unknown[]) => {
@@ -30,7 +36,10 @@ const initGoogleAnalytics = () => {
   };
 
   gaWindow.gtag("js", new Date());
-  gaWindow.gtag("config", GA_MEASUREMENT_ID);
+  gaWindow.gtag("config", GA_MEASUREMENT_ID, {
+    send_page_view: true,
+    debug_mode: import.meta.env.VITE_GA_DEBUG === "true",
+  });
 };
 
 initGoogleAnalytics();
