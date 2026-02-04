@@ -31,8 +31,10 @@ const initGoogleAnalytics = () => {
 
   gaWindow.dataLayer = gaWindow.dataLayer || [];
 
-  gaWindow.gtag = (...args: unknown[]) => {
-    gaWindow.dataLayer?.push(args);
+  gaWindow.gtag = function () {
+    // GA expects queued entries in the same shape as the official snippet.
+    // eslint-disable-next-line prefer-rest-params
+    gaWindow.dataLayer?.push(arguments);
   };
 
   gaWindow.gtag("js", new Date());
