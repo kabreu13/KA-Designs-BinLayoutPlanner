@@ -85,11 +85,24 @@ interface LayoutContextValue {
 const LayoutContext = createContext<LayoutContextValue | undefined>(undefined);
 const STORAGE_KEY = 'bin-layout-state';
 const MIN_DRAWER_DIMENSION = 0.25;
+const MAX_DRAWER_DIMENSION = 200;
+const MIN_BIN_DIMENSION = 2;
+const MAX_BIN_DIMENSION = 8;
+const MAX_LAYOUT_TITLE_LENGTH = 80;
+const MAX_LABEL_LENGTH = 80;
+const MAX_PLACEMENTS = 500;
+const MAX_SERIALIZED_LAYOUT_CHARS = 200_000;
+const MAX_LAYOUT_QUERY_PARAM_CHARS = 300_000;
+const HEX_COLOR_PATTERN = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/;
+const BINS_BY_ID = new Map(BINS.map((bin) => [bin.id, bin]));
+
+const roundToQuarterInch = (value: number) => Math.round(value * 4) / 4;
+const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 
 const normalizeDrawerDimension = (value: unknown) => {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
-  const roundedToQuarterInch = Math.round(value * 4) / 4;
-  if (roundedToQuarterInch < MIN_DRAWER_DIMENSION) return null;
+  if (!isFiniteNumber(value)) return null;
+  const roundedToQuarterInch = roundToQuarterInch(value);
+  if (roundedToQuarterInch < MIN_DRAWER_DIMENSION || roundedToQuarterInch > MAX_DRAWER_DIMENSION) return null;
   return roundedToQuarterInch;
 };
 
@@ -100,11 +113,111 @@ const normalizeDrawerSize = (width: unknown, length: unknown) => {
   return { width: normalizedWidth, length: normalizedLength };
 };
 
-const withDefaultColor = (placement: Placement): Placement => ({
-  ...placement,
-  color: normalizeHexColor(placement.color ?? DEFAULT_BIN_COLOR)
-});
-const normalizePlacements = (placements: Placement[]) => placements.map(withDefaultColor);
+const normalizeBinDimension = (value: unknown) => {
+  if (!isFiniteNumber(value)) return null;
+  const roundedToQuarterInch = roundToQuarterInch(value);
+  if (roundedToQuarterInch < MIN_BIN_DIMENSION || roundedToQuarterInch > MAX_BIN_DIMENSION) return null;
+  return roundedToQuarterInch;
+};
+
+const normalizeCoordinate = (value: unknown) => {
+  if (!isFiniteNumber(value)) return null;
+  const roundedToQuarterInch = roundToQuarterInch(value);
+  if (roundedToQuarterInch < 0 || roundedToQuarterInch > MAX_DRAWER_DIMENSION) return null;
+  return roundedToQuarterInch;
+};
+
+const normalizeOptionalText = (value: unknown, maxLength: number) => {
+  if (typeof value !== 'string') return undefined;
+  return value.slice(0, maxLength);
+};
+
+const normalizePlacementColor = (value: unknown) => {
+  if (typeof value !== 'string') return DEFAULT_BIN_COLOR;
+  const normalized = normalizeHexColor(value);
+  return HEX_COLOR_PATTERN.test(normalized) ? normalized : DEFAULT_BIN_COLOR;
+};
+
+const getPlacementSize = (placement: Pick<Placement, 'binId' | 'width' | 'length'>) => {
+  const bin = BINS_BY_ID.get(placement.binId);
+  if (!bin) return null;
+  const width = placement.width ?? bin.width;
+  const length = placement.length ?? bin.length;
+  return { width, length };
+};
+
+const normalizePlacement = (
+  candidate: unknown,
+  drawerSize: { width: number; length: number },
+  seenIds: Set<string>
+) => {
+  if (!candidate || typeof candidate !== 'object') return null;
+  const value = candidate as Record<string, unknown>;
+
+  const id = normalizeOptionalText(value.id, 120)?.trim();
+  if (!id || seenIds.has(id)) return null;
+
+  const binId = typeof value.binId === 'string' ? value.binId : null;
+  if (!binId || !BINS_BY_ID.has(binId)) return null;
+
+  const x = normalizeCoordinate(value.x);
+  const y = normalizeCoordinate(value.y);
+  if (x == null || y == null) return null;
+
+  const width = value.width == null ? undefined : normalizeBinDimension(value.width);
+  const length = value.length == null ? undefined : normalizeBinDimension(value.length);
+  if ((value.width != null && width == null) || (value.length != null && length == null)) return null;
+
+  const normalized: Placement = {
+    id,
+    binId,
+    x,
+    y,
+    ...(width != null ? { width } : {}),
+    ...(length != null ? { length } : {}),
+    color: normalizePlacementColor(value.color)
+  };
+
+  const label = normalizeOptionalText(value.label, MAX_LABEL_LENGTH);
+  if (label !== undefined) normalized.label = label;
+
+  const size = getPlacementSize(normalized);
+  if (!size) return null;
+  if (normalized.x + size.width > drawerSize.width || normalized.y + size.length > drawerSize.length) return null;
+
+  seenIds.add(id);
+  return normalized;
+};
+
+const normalizeIncomingState = (incoming: unknown): LayoutState | null => {
+  if (!incoming || typeof incoming !== 'object') return null;
+  const value = incoming as Record<string, unknown>;
+  const normalizedSize = normalizeDrawerSize(value.drawerWidth, value.drawerLength);
+  if (!normalizedSize || !Array.isArray(value.placements)) return null;
+  if (value.placements.length > MAX_PLACEMENTS) return null;
+
+  const placements: Placement[] = [];
+  const seenIds = new Set<string>();
+  for (const candidate of value.placements) {
+    const normalized = normalizePlacement(candidate, normalizedSize, seenIds);
+    if (!normalized) return null;
+    placements.push(normalized);
+  }
+
+  return {
+    layoutTitle:
+      typeof value.layoutTitle === 'string' ? value.layoutTitle.slice(0, MAX_LAYOUT_TITLE_LENGTH) : '',
+    drawerWidth: normalizedSize.width,
+    drawerLength: normalizedSize.length,
+    placements
+  };
+};
+
+const parseSerializedState = (raw: string): LayoutState | null => {
+  if (raw.length > MAX_SERIALIZED_LAYOUT_CHARS) return null;
+  const parsed = JSON.parse(raw) as unknown;
+  return normalizeIncomingState(parsed);
+};
 
 export function LayoutProvider({ children }: { children: React.ReactNode }) {
   const devWarn = (...args: unknown[]) => {
@@ -134,32 +247,21 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
   const [activePlacementEditor, setActivePlacementEditor] = useState<{ placementIds: string[]; x: number; y: number } | null>(null);
 
   const state = history.present;
-  const getPlacementSize = (placement: Placement) => {
-    const bin = BINS.find((b) => b.id === placement.binId);
-    const width = placement.width ?? bin?.width;
-    const length = placement.length ?? bin?.length;
-    if (width == null || length == null) return null;
-    return { width, length };
-  };
 
   // Load from localStorage once
   useEffect(() => {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return;
     try {
-      const parsed = JSON.parse(raw) as Partial<LayoutState>;
-      const normalizedSize = normalizeDrawerSize(parsed.drawerWidth, parsed.drawerLength);
-      if (normalizedSize && Array.isArray(parsed.placements)) {
+      const parsed = parseSerializedState(raw);
+      if (parsed) {
         setHistory({
           past: [],
-          present: {
-            layoutTitle: typeof parsed.layoutTitle === 'string' ? parsed.layoutTitle : '',
-            drawerWidth: normalizedSize.width,
-            drawerLength: normalizedSize.length,
-            placements: normalizePlacements(parsed.placements)
-          },
+          present: parsed,
           future: []
         });
+      } else {
+        devWarn('Ignoring invalid persisted layout state');
       }
     } catch (err) {
       devWarn('Failed to load layout state', err);
@@ -171,22 +273,33 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
     const params = new URLSearchParams(window.location.search);
     const encoded = params.get('layout');
     if (!encoded) return;
+    if (encoded.length > MAX_LAYOUT_QUERY_PARAM_CHARS) {
+      devWarn('Ignoring oversized share link payload');
+      return;
+    }
     try {
-      const json = atob(decodeURIComponent(encoded));
-      const parsed = JSON.parse(json) as Partial<LayoutState>;
-      const normalizedSize = normalizeDrawerSize(parsed.drawerWidth, parsed.drawerLength);
-      if (normalizedSize && Array.isArray(parsed.placements)) {
-        setHistory({
-          past: [],
-          present: {
-            layoutTitle: typeof parsed.layoutTitle === 'string' ? parsed.layoutTitle : '',
-            drawerWidth: normalizedSize.width,
-            drawerLength: normalizedSize.length,
-            placements: normalizePlacements(parsed.placements)
-          },
-          future: []
-        });
+      const decoded = decodeURIComponent(encoded);
+      if (decoded.length > MAX_LAYOUT_QUERY_PARAM_CHARS) {
+        devWarn('Ignoring oversized share link payload');
+        return;
       }
+      const json = atob(decoded);
+      const parsed = parseSerializedState(json);
+      if (!parsed) {
+        devWarn('Ignoring invalid share link payload');
+        return;
+      }
+      const shouldApply =
+        typeof window.confirm !== 'function'
+          ? true
+          : window.confirm('Load shared layout from this link? This will replace your current layout.');
+      if (!shouldApply) return;
+
+      setHistory({
+        past: [],
+        present: parsed,
+        future: []
+      });
     } catch (err) {
       devWarn('Failed to load layout from share link', err);
     }
@@ -194,7 +307,11 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
 
   // Persist whenever state changes
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (err) {
+      devWarn('Failed to persist layout state', err);
+    }
   }, [state]);
 
   // Dev-only invariant checks: bounds + overlap
@@ -546,14 +663,9 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
 
   const exportState = () => state;
   const importState = (incoming: LayoutState) => {
-    const normalizedSize = normalizeDrawerSize(incoming.drawerWidth, incoming.drawerLength);
-    if (!normalizedSize || !Array.isArray(incoming.placements)) return false;
-    pushState({
-      layoutTitle: typeof incoming.layoutTitle === 'string' ? incoming.layoutTitle : '',
-      drawerWidth: normalizedSize.width,
-      drawerLength: normalizedSize.length,
-      placements: normalizePlacements(incoming.placements)
-    });
+    const normalized = normalizeIncomingState(incoming);
+    if (!normalized) return false;
+    pushState(normalized);
     return true;
   };
 

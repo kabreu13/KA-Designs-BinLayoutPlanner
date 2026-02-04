@@ -1,6 +1,6 @@
 /* @vitest-environment jsdom */
 import React from 'react';
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { LayoutProvider, useLayout } from '../src/context/LayoutContext';
 
@@ -320,9 +320,16 @@ function Harness() {
 }
 
 describe('LayoutProvider', () => {
+  let confirmSpy: ReturnType<typeof vi.spyOn>;
+
   beforeEach(() => {
     localStorage.clear();
     history.replaceState({}, '', '/');
+    confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+  });
+
+  afterEach(() => {
+    confirmSpy.mockRestore();
   });
 
   it('adds, moves, undoes, and redoes placements', () => {
@@ -455,6 +462,37 @@ describe('LayoutProvider', () => {
     expect(screen.getByTestId('count').textContent).toBe('1');
   });
 
+  it('requires confirmation before applying share link payload', () => {
+    localStorage.setItem(
+      'bin-layout-state',
+      JSON.stringify({
+        drawerWidth: 10,
+        drawerLength: 12,
+        placements: [{ id: 'local', binId: 'bin-2x2', x: 1, y: 1 }]
+      })
+    );
+    const encoded = encodeURIComponent(
+      btoa(
+        JSON.stringify({
+          drawerWidth: 8,
+          drawerLength: 9,
+          placements: [{ id: 'shared', binId: 'bin-2x2', x: 2, y: 2 }]
+        })
+      )
+    );
+    history.replaceState({}, '', `/?layout=${encoded}`);
+    confirmSpy.mockReturnValueOnce(false);
+
+    render(
+      <LayoutProvider>
+        <Harness />
+      </LayoutProvider>
+    );
+
+    expect(screen.getByTestId('drawer').textContent).toBe('10x12');
+    expect(screen.getByTestId('count').textContent).toBe('1');
+  });
+
   it('ignores share link payloads with missing fields', () => {
     const encoded = encodeURIComponent(btoa(JSON.stringify({ drawerWidth: 8, drawerLength: 9 })));
     history.replaceState({}, '', `/?layout=${encoded}`);
@@ -582,14 +620,14 @@ describe('LayoutProvider', () => {
     expect(screen.getByTestId('last-status').textContent).toBe('blocked');
   });
 
-  it('imports out-of-bounds placements without crashing', () => {
+  it('rejects out-of-bounds placements during import', () => {
     render(
       <LayoutProvider>
         <Harness />
       </LayoutProvider>
     );
     fireEvent.click(screen.getByText('import-out-of-bounds'));
-    expect(screen.getByTestId('count').textContent).toBe('1');
+    expect(screen.getByTestId('count').textContent).toBe('0');
   });
 
   it('updatePlacement updates label and color', () => {
