@@ -16,12 +16,17 @@ export default async function globalTeardown() {
   const { createCoverageMap } = libCoverage;
   const { createContext } = libReport;
   const coverageMap = createCoverageMap({});
+  const coverageFiles = readdirSync(nycOutputDir).filter((file) => file.endsWith('.json'));
 
-  for (const file of readdirSync(nycOutputDir)) {
-    if (!file.endsWith('.json')) continue;
+  for (const file of coverageFiles) {
     const fullPath = path.join(nycOutputDir, file);
     const data = JSON.parse(readFileSync(fullPath, 'utf8'));
     coverageMap.merge(data);
+  }
+
+  if (coverageMap.files().length === 0) {
+    rmSync(nycOutputDir, { recursive: true, force: true });
+    return;
   }
 
   mkdirSync(coverageDir, { recursive: true });

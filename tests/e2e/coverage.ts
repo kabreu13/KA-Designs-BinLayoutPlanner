@@ -9,9 +9,10 @@ const nycOutputDir = path.resolve(__dirname, '../../.nyc_output');
 
 test.afterEach(async ({ page }) => {
   if (!coverageEnabled()) return;
-  mkdirSync(nycOutputDir, { recursive: true });
+  if (page.isClosed()) return;
   const coverage = await page.evaluate(() => (window as { __coverage__?: unknown }).__coverage__ ?? null);
   if (coverage) {
+    mkdirSync(nycOutputDir, { recursive: true });
     const filename = path.join(
       nycOutputDir,
       `coverage-${Date.now()}-${Math.random().toString(16).slice(2)}.json`
