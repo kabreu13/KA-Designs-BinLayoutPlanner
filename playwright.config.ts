@@ -1,5 +1,7 @@
 import { defineConfig } from '@playwright/test';
 
+const webServerCommand = process.env.PLAYWRIGHT_WEB_SERVER_COMMAND || 'npm run dev -- --host --port 4173';
+
 export default defineConfig({
   testDir: './tests/e2e',
   retries: 0,
@@ -10,9 +12,9 @@ export default defineConfig({
     headless: true
   },
   webServer: {
-    command: 'npm run dev -- --host --port 4173',
+    command: webServerCommand,
     url: 'http://localhost:4173',
-    reuseExistingServer: true,
+    reuseExistingServer: !process.env.CI,
     stdout: 'ignore',
     stderr: 'ignore'
   }
