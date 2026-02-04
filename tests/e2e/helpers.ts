@@ -26,3 +26,15 @@ export const clickBinBySize = async (page: Page, size: `${number}x${number}`) =>
   await expect(card).toBeVisible();
   await card.click();
 };
+
+export type StoredPlacement = { id: string; binId: string; x: number; y: number };
+
+export const getStoredPlacements = async (page: Page): Promise<StoredPlacement[]> =>
+  page.evaluate(() => {
+    const raw = localStorage.getItem('bin-layout-state');
+    return raw ? (JSON.parse(raw).placements ?? []) : [];
+  });
+
+export const expectStoredPlacementsCount = async (page: Page, count: number) => {
+  await expect.poll(async () => (await getStoredPlacements(page)).length).toBe(count);
+};

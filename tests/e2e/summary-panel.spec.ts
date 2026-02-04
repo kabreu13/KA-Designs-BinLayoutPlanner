@@ -1,15 +1,9 @@
 import './coverage';
 import { test, expect } from '@playwright/test';
-import { ensureCatalogExpanded } from './helpers';
+import { ensureCatalogExpanded, expectStoredPlacementsCount, getStoredPlacements } from './helpers';
 
 const BIN_CARD = '[data-testid="bin-card"]';
 const PLACED = '[data-testid="placed-bin"]';
-
-const getPlacements = async (page: import('@playwright/test').Page) =>
-  page.evaluate(() => {
-    const raw = localStorage.getItem('bin-layout-state');
-    return raw ? (JSON.parse(raw).placements ?? []) : [];
-  });
 
 test('drawer size inputs update canvas labels', async ({ page }) => {
   await page.goto('/');
@@ -94,7 +88,8 @@ test('remove bin from summary updates placements', async ({ page }) => {
   await binCard.click();
 
   await expect(page.locator(PLACED)).toHaveCount(2);
-  const before = await getPlacements(page);
+  await expectStoredPlacementsCount(page, 2);
+  const before = await getStoredPlacements(page);
   expect(before.length).toBe(2);
 
   const removeButton = page
@@ -103,7 +98,8 @@ test('remove bin from summary updates placements', async ({ page }) => {
     .getByRole('button', { name: 'Delete bin' });
   await removeButton.click({ force: true });
 
-  const after = await getPlacements(page);
+  await expectStoredPlacementsCount(page, 1);
+  const after = await getStoredPlacements(page);
   expect(after.length).toBe(1);
 });
 

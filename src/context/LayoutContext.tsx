@@ -673,22 +673,36 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const meta = e.metaKey || e.ctrlKey;
-      if (!meta) return;
-      if (e.key.toLowerCase() === 'z' && !e.shiftKey) {
-        if (history.past.length > 0) {
-          e.preventDefault();
-          undo();
-        }
-      } else if (e.key.toLowerCase() === 'z' && e.shiftKey) {
-        if (history.future.length > 0) {
-          e.preventDefault();
-          redo();
-        }
+      if (!meta || e.key.toLowerCase() !== 'z') return;
+      e.preventDefault();
+
+      if (e.shiftKey) {
+        setHistory((prev) =>
+          prev.future.length === 0
+            ? prev
+            : {
+                past: [...prev.past, prev.present],
+                present: prev.future[0],
+                future: prev.future.slice(1)
+              }
+        );
+        return;
       }
+
+      setHistory((prev) =>
+        prev.past.length === 0
+          ? prev
+          : {
+              past: prev.past.slice(0, -1),
+              present: prev.past[prev.past.length - 1],
+              future: [prev.present, ...prev.future]
+            }
+      );
     };
+
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [history.past.length, history.future.length]);
+  }, []);
 
   const { spaceUsedPercent } = useMemo(() => {
     const totalArea = state.drawerWidth * state.drawerLength;

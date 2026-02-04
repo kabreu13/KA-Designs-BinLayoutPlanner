@@ -30,3 +30,6 @@ playwright-report
 
 TODO.txt
 vite-env.d.ts
+
+.vercel
+.env*.local
