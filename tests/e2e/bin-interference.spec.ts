@@ -64,8 +64,10 @@ test('dragging an existing bin onto another does not overlap', async ({ page }) 
   await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, { steps: 12 });
   await page.mouse.up();
 
+  await expect
+    .poll(async () => ((await getPlacements(page)) as Placement[]).length)
+    .toBeGreaterThanOrEqual(2);
   const placements = (await getPlacements(page)) as Placement[];
-  expect(placements.length).toBeGreaterThanOrEqual(2);
   expect(hasOverlap(placements)).toBe(false);
 });
 
@@ -94,8 +96,10 @@ test('dropping a new bin onto an occupied area auto-fits without overlap', async
   await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, { steps: 12 });
   await page.mouse.up();
 
+  await expect
+    .poll(async () => ((await getPlacements(page)) as Placement[]).length)
+    .toBeGreaterThanOrEqual(2);
   const placements = (await getPlacements(page)) as Placement[];
-  expect(placements.length).toBeGreaterThanOrEqual(2);
   expect(hasOverlap(placements)).toBe(false);
 });
 
@@ -107,7 +111,9 @@ test('interference checks work with different bin sizes', async ({ page }) => {
   await clickBinBySize(page, '2x2');
 
   await expect(page.locator(PLACED)).toHaveCount(2);
+  await expect
+    .poll(async () => ((await getPlacements(page)) as Placement[]).length)
+    .toBeGreaterThanOrEqual(2);
   const placements = (await getPlacements(page)) as Placement[];
-  expect(placements.length).toBeGreaterThanOrEqual(2);
   expect(hasOverlap(placements)).toBe(false);
 });

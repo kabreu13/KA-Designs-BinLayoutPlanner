@@ -304,9 +304,9 @@ export function Canvas({
     if (result.status === 'blocked') setToast({ type: 'error', message: 'Cannot resize — no space available.' });
   };
 
-  const commitLabel = () => {
+  const commitLabel = (rawLabel?: string) => {
     if (selectedPlacementIds.length === 0) return;
-    const nextLabel = labelDraft.trim();
+    const nextLabel = (rawLabel ?? labelDraft).trim();
     updatePlacements(selectedPlacementIds, { label: nextLabel });
   };
 
@@ -1486,10 +1486,10 @@ export function Canvas({
                 type="text"
                 value={labelDraft}
                 onChange={(e) => setLabelDraft(e.target.value)}
-                onBlur={commitLabel}
+                onBlur={(e) => commitLabel(e.currentTarget.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
-                    commitLabel();
+                    commitLabel((e.target as HTMLInputElement).value);
                     (e.target as HTMLInputElement).blur();
                   }
                 }}
