@@ -220,6 +220,7 @@ function Harness() {
       <button
         onClick={() =>
           importState({
+            layoutTitle: 'Test Layout',
             drawerWidth: 24,
             drawerLength: 18,
             placements: []
@@ -231,6 +232,7 @@ function Harness() {
       <button
         onClick={() =>
           importState({
+            layoutTitle: 'Test Layout',
             drawerWidth: 24,
             drawerLength: 0,
             placements: []
@@ -242,6 +244,7 @@ function Harness() {
       <button
         onClick={() =>
           importState({
+            layoutTitle: 'Test Layout',
             drawerWidth: 0,
             drawerLength: 0,
             placements: 'nope' as unknown as []
@@ -253,6 +256,7 @@ function Harness() {
       <button
         onClick={() =>
           importState({
+            layoutTitle: 'Test Layout',
             drawerWidth: 2,
             drawerLength: 2,
             placements: [
@@ -267,6 +271,7 @@ function Harness() {
       <button
         onClick={() =>
           importState({
+            layoutTitle: 'Test Layout',
             drawerWidth: 4,
             drawerLength: 4,
             placements: [
@@ -281,6 +286,7 @@ function Harness() {
       <button
         onClick={() =>
           importState({
+            layoutTitle: 'Test Layout',
             drawerWidth: 4,
             drawerLength: 4,
             placements: [{ id: 'p1', binId: 'bin-2x2', x: -1, y: 3 }]
@@ -292,6 +298,7 @@ function Harness() {
       <button
         onClick={() =>
           importState({
+            layoutTitle: 'Test Layout',
             drawerWidth: 8,
             drawerLength: 8,
             placements: [
@@ -307,6 +314,7 @@ function Harness() {
       <button
         onClick={() =>
           importState({
+            layoutTitle: 'Test Layout',
             drawerWidth: 8,
             drawerLength: 8,
             placements: [{ id: 'p1', binId: 'bin-2x2', x: 0, y: 0 }]

@@ -1,13 +1,13 @@
 import { useMemo, useState, useEffect } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { Button } from './ui/Button';
-import { Trash2, AlertCircle } from 'lucide-react';
+import { Trash2, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import { useLayout } from '../context/LayoutContext';
 import { DEFAULT_BIN_COLOR, getColorLabel, normalizeHexColor } from '../utils/colors';
 import { BinSizePreview } from './BinSizePreview';
 import { buildEtsyCartUrl } from '../lib/etsy';
 
-export function SummaryPanel() {
+export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
   const {
     placements,
     bins,
@@ -22,11 +22,18 @@ export function SummaryPanel() {
 
   const drawerArea = drawerWidth * drawerLength;
   const [status, setStatus] = useState<{ kind: 'info' | 'error'; text: string } | null>(null);
+  const [isDrawerSettingsOpen, setIsDrawerSettingsOpen] = useState(true);
   useEffect(() => {
     if (!status) return;
     const id = window.setTimeout(() => setStatus(null), 2500);
     return () => window.clearTimeout(id);
   }, [status]);
+
+  useEffect(() => {
+    if (!mobile) {
+      setIsDrawerSettingsOpen(true);
+    }
+  }, [mobile]);
 
   const uniquePlacements = useMemo(() => {
     const seen = new Map<string, typeof placements[number]>();
@@ -128,68 +135,133 @@ export function SummaryPanel() {
     [placementGroups]
   );
 
+  const exportPdf = async () => {
+    const { exportLayoutToPdf } = await import('../lib/exporters');
+    const nav = navigator as Navigator & {
+      share?: (data: ShareData) => Promise<void>;
+      canShare?: (data?: ShareData) => boolean;
+    };
+
+    if (mobile && nav.share) {
+      try {
+        const pdfBlob = await exportLayoutToPdf(drawerWidth, drawerLength, placements, bins, layoutTitle, {
+          mode: 'blob'
+        });
+        if (pdfBlob instanceof Blob) {
+          const file = new File([pdfBlob], 'bin-layout.pdf', { type: 'application/pdf' });
+          const sharePayload: ShareData = {
+            title: layoutTitle || 'Bin Layout',
+            text: 'Bin layout export',
+            files: [file]
+          };
+          if (!nav.canShare || nav.canShare(sharePayload)) {
+            await nav.share(sharePayload);
+            setStatus({ kind: 'info', text: 'Share sheet opened' });
+            return;
+          }
+        }
+      } catch {
+        // Continue with fallback download.
+      }
+    }
+
+    await exportLayoutToPdf(drawerWidth, drawerLength, placements, bins, layoutTitle);
+    if (mobile) {
+      setStatus({ kind: 'info', text: 'PDF downloaded' });
+    }
+  };
+
   return (
-    <div className="w-[320px] bg-white border-l border-slate-900/[0.06] flex flex-col h-full">
-      <div className="p-6 border-b border-slate-900/[0.06] space-y-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-          Drawer Settings
-        </h2>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="text-xs text-slate-400 mb-1 block">Length (in)</label>
-            <input
-              type="number"
-              min={6}
-              step={0.25}
-              aria-label="Drawer length"
-              data-testid="drawer-length-input"
-              value={drawerLength}
-              onChange={(e) => setDrawerSize(drawerWidth, Number(e.target.value) || drawerLength)}
-              className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-[#0B0B0C] focus:outline-none focus:ring-2 focus:ring-[#14476B]/20"
-            />
-          </div>
-          <div>
-            <label className="text-xs text-slate-400 mb-1 block">Width (in)</label>
-            <input
-              type="number"
-              min={6}
-              step={0.25}
-              aria-label="Drawer width"
-              data-testid="drawer-width-input"
-              value={drawerWidth}
-              onChange={(e) => setDrawerSize(Number(e.target.value) || drawerWidth, drawerLength)}
-              className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-[#0B0B0C] focus:outline-none focus:ring-2 focus:ring-[#14476B]/20"
-            />
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <div className="flex justify-between text-xs">
-            <span className="text-slate-500">Space Used</span>
-            <span className="font-medium text-[#14476B]">{spaceUsedPercent.toFixed(0)}%</span>
-          </div>
-          <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-            <div className="h-full bg-[#14476B]" style={{ width: `${spaceUsedPercent}%` }} />
-          </div>
-          <p className="text-xs text-slate-400 flex items-center gap-1 mt-2">
-            <AlertCircle className="h-3 w-3" />
-            {uniquePlacements.length} bins placed · Drawer area {drawerArea.toFixed(0)} in²
-          </p>
-          <p
-            className={`text-xs flex items-center gap-1 ${
-              invalidCount === 0 ? 'text-emerald-600' : 'text-amber-600'
-            }`}
+    <div
+      className={`bg-white flex flex-col h-full ${
+        mobile ? 'w-full border-0' : 'w-[320px] border-l border-slate-900/[0.06]'
+      }`}
+    >
+      <div className={`${mobile ? 'p-4' : 'p-6'} border-b border-slate-900/[0.06] space-y-4`}>
+        {mobile ? (
+          <button
+            type="button"
+            data-testid="drawer-settings-toggle"
+            aria-expanded={isDrawerSettingsOpen}
+            onClick={() => setIsDrawerSettingsOpen((open) => !open)}
+            className="w-full min-h-11 px-1 flex items-center justify-between text-left"
           >
-            <AlertCircle className="h-3 w-3" />
-            {invalidCount === 0
-              ? 'All bins safely placed.'
-              : `${invalidCount} bin${invalidCount === 1 ? '' : 's'} need attention.`}
-          </p>
-        </div>
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Drawer Settings</h2>
+            {isDrawerSettingsOpen ? (
+              <ChevronUp className="h-4 w-4 text-slate-500" />
+            ) : (
+              <ChevronDown className="h-4 w-4 text-slate-500" />
+            )}
+          </button>
+        ) : (
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+            Drawer Settings
+          </h2>
+        )}
+
+        {(!mobile || isDrawerSettingsOpen) && (
+          <div className="space-y-4">
+            <div className={`grid ${mobile ? 'grid-cols-1 gap-3' : 'grid-cols-2 gap-4'}`}>
+              <div>
+                <label className="text-xs text-slate-400 mb-1 block">Length (in)</label>
+                <input
+                  type="number"
+                  min={6}
+                  step={0.25}
+                  aria-label="Drawer length"
+                  data-testid="drawer-length-input"
+                  value={drawerLength}
+                  onChange={(e) => setDrawerSize(drawerWidth, Number(e.target.value) || drawerLength)}
+                  className={`w-full bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-[#0B0B0C] focus:outline-none focus:ring-2 focus:ring-[#14476B]/20 ${
+                    mobile ? 'p-3 min-h-11' : 'p-2'
+                  }`}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-400 mb-1 block">Width (in)</label>
+                <input
+                  type="number"
+                  min={6}
+                  step={0.25}
+                  aria-label="Drawer width"
+                  data-testid="drawer-width-input"
+                  value={drawerWidth}
+                  onChange={(e) => setDrawerSize(Number(e.target.value) || drawerWidth, drawerLength)}
+                  className={`w-full bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-[#0B0B0C] focus:outline-none focus:ring-2 focus:ring-[#14476B]/20 ${
+                    mobile ? 'p-3 min-h-11' : 'p-2'
+                  }`}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex justify-between text-xs">
+                <span className="text-slate-500">Space Used</span>
+                <span className="font-medium text-[#14476B]">{spaceUsedPercent.toFixed(0)}%</span>
+              </div>
+              <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                <div className="h-full bg-[#14476B]" style={{ width: `${spaceUsedPercent}%` }} />
+              </div>
+              <p className="text-xs text-slate-400 flex items-center gap-1 mt-2">
+                <AlertCircle className="h-3 w-3" />
+                {uniquePlacements.length} bins placed · Drawer area {drawerArea.toFixed(0)} in²
+              </p>
+              <p
+                className={`text-xs flex items-center gap-1 ${
+                  invalidCount === 0 ? 'text-emerald-600' : 'text-amber-600'
+                }`}
+              >
+                <AlertCircle className="h-3 w-3" />
+                {invalidCount === 0
+                  ? 'All bins safely placed.'
+                  : `${invalidCount} bin${invalidCount === 1 ? '' : 's'} need attention.`}
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className={`flex-1 overflow-y-auto ${mobile ? 'p-4 hide-scrollbar' : 'p-6'}`}>
         <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-4">
           Placed Items
         </h3>
@@ -231,7 +303,7 @@ export function SummaryPanel() {
                 </div>
                 <button
                   aria-label="Delete bin"
-                  className="text-slate-300 hover:text-red-500 transition-colors"
+                  className={`text-slate-300 hover:text-red-500 transition-colors ${mobile ? 'min-h-11 min-w-11' : ''}`}
                   onClick={(event) => {
                     event.stopPropagation();
                     removePlacement(group.placements[0].id);
@@ -245,18 +317,15 @@ export function SummaryPanel() {
         </div>
       </div>
 
-      <div className="p-6 bg-slate-50 border-t border-slate-900/[0.06] space-y-4">
-        <div className="grid grid-cols-2 gap-3">
+      <div className={`${mobile ? 'p-4' : 'p-6'} bg-slate-50 border-t border-slate-900/[0.06] space-y-4`}>
+        <div className={`grid ${mobile ? 'grid-cols-1' : 'grid-cols-2'} gap-3`}>
           <Button
             variant="secondary"
             size="sm"
-            className="w-full text-xs"
-            onClick={async () => {
-              const { exportLayoutToPdf } = await import('../lib/exporters');
-              return exportLayoutToPdf(drawerWidth, drawerLength, placements, bins, layoutTitle);
-            }}
+            className={`w-full text-xs ${mobile ? 'min-h-11' : ''}`}
+            onClick={exportPdf}
           >
-            Export PDF
+            {mobile ? 'Share PDF' : 'Export PDF'}
           </Button>
           {/* <Button
             variant="secondary"
@@ -307,7 +376,7 @@ export function SummaryPanel() {
           <Button
             variant="secondary"
             size="sm"
-            className="w-full text-xs"
+            className={`w-full text-xs ${mobile ? 'min-h-11' : ''}`}
             onClick={() => {
               const cart = buildEtsyCartUrl(etsyCartItems);
               if (cart.missingListingId) {

@@ -73,6 +73,8 @@ test('drag delta stays consistent at 1x scale', async ({ page }) => {
 
   const before = (await getStoredPlacements(page)) as Placement[];
   const beforePlacement = before[0];
+  const bin = binsById.get(beforePlacement.binId);
+  if (!bin) throw new Error(`Missing bin metadata for ${beforePlacement.binId}`);
 
   const box = await placed.boundingBox();
   if (!box) throw new Error('Missing placed bin bounding box');
@@ -83,8 +85,10 @@ test('drag delta stays consistent at 1x scale', async ({ page }) => {
   await page.mouse.move(box.x + box.width / 2 + deltaPx.x, box.y + box.height / 2 + deltaPx.y, { steps: 12 });
   await page.mouse.up();
 
-  const expectedDx = deltaPx.x / 25;
-  const expectedDy = deltaPx.y / 25;
+  const pixelsPerInchX = box.width / bin.width;
+  const pixelsPerInchY = box.height / bin.length;
+  const expectedDx = Math.round(deltaPx.x / pixelsPerInchX);
+  const expectedDy = Math.round(deltaPx.y / pixelsPerInchY);
 
   await expect
     .poll(async () => {
@@ -111,6 +115,8 @@ test('drag delta is consistent with snap 1 and snap 0.5', async ({ page }) => {
 
   const before = (await getStoredPlacements(page)) as Placement[];
   const beforePlacement = before[0];
+  const bin = binsById.get(beforePlacement.binId);
+  if (!bin) throw new Error(`Missing bin metadata for ${beforePlacement.binId}`);
 
   const box = await placed.boundingBox();
   if (!box) throw new Error('Missing placed bin bounding box');
@@ -123,7 +129,8 @@ test('drag delta is consistent with snap 1 and snap 0.5', async ({ page }) => {
 
   const mid = (await getStoredPlacements(page)) as Placement[];
   const midPlacement = mid[0];
-  const expectedSnap1 = Math.round(deltaPx.x / 25);
+  const pixelsPerInchX = box.width / bin.width;
+  const expectedSnap1 = Math.round(deltaPx.x / pixelsPerInchX);
   expect(midPlacement.x - beforePlacement.x).toBeCloseTo(expectedSnap1, 1);
   expect(midPlacement.y - beforePlacement.y).toBeCloseTo(expectedSnap1, 1);
 
@@ -131,6 +138,7 @@ test('drag delta is consistent with snap 1 and snap 0.5', async ({ page }) => {
 
   const box2 = await placed.boundingBox();
   if (!box2) throw new Error('Missing placed bin bounding box');
+  const pixelsPerInchXAfterSnapChange = box2.width / bin.width;
 
   const deltaPx2 = { x: 38, y: 38 };
   await page.mouse.move(box2.x + box2.width / 2, box2.y + box2.height / 2);
@@ -140,7 +148,7 @@ test('drag delta is consistent with snap 1 and snap 0.5', async ({ page }) => {
 
   const after = (await getStoredPlacements(page)) as Placement[];
   const afterPlacement = after[0];
-  const expectedSnapHalf = Math.round((deltaPx2.x / 25) / 0.5) * 0.5;
+  const expectedSnapHalf = Math.round((deltaPx2.x / pixelsPerInchXAfterSnapChange) / 0.5) * 0.5;
   expect(afterPlacement.x - midPlacement.x).toBeCloseTo(expectedSnapHalf, 1);
   expect(afterPlacement.y - midPlacement.y).toBeCloseTo(expectedSnapHalf, 1);
 });

@@ -1,8 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { MouseEvent as ReactMouseEvent } from 'react';
+import type {
+  HTMLAttributes,
+  MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent
+} from 'react';
 import { useDndMonitor, useDroppable, useDraggable } from '@dnd-kit/core';
+import { TransformComponent, TransformWrapper } from 'react-zoom-pan-pinch';
+import type { ReactZoomPanPinchContentRef, ReactZoomPanPinchRef } from 'react-zoom-pan-pinch';
 import { Button } from './ui/Button';
-import { Grid, Sparkles, RotateCcw, RotateCw, PaintBucket, Trash2 } from 'lucide-react';
+import { Grid, Sparkles, RotateCcw, RotateCw, PaintBucket, Trash2, ChevronDown, ChevronUp, ZoomIn, ZoomOut, House, GripHorizontal } from 'lucide-react';
 import { useLayout } from '../context/LayoutContext';
 import { applyDelta, type DragItem, type Point } from '../utils/dragMath';
 import type { Bin, Placement } from '../context/LayoutContext';
@@ -26,6 +32,16 @@ const LABEL_ZONE = CANVAS_PADDING / 2; // center labels within the padding zone
 const EDITOR_WIDTH_PX = 240;
 const EDITOR_OFFSET_PX = 12;
 const VIEWPORT_PADDING_PX = 8;
+const MIN_CANVAS_ZOOM = 0.5;
+const MAX_CANVAS_ZOOM = 2.5;
+const ZOOM_DECIMALS = 4;
+const ZOOM_BUTTON_ANIMATION_MS = 140;
+const ZOOM_FIT_ANIMATION_MS = 180;
+const WHEEL_ZOOM_SENSITIVITY = 0.00125;
+const DESKTOP_CANVAS_STAGE_GUTTER_PX = 72;
+const MOBILE_CANVAS_STAGE_GUTTER_PX = 48;
+const TRANSFORM_WRAPPER_TEST_PROPS = { 'data-testid': 'canvas-transform-wrapper' } as HTMLAttributes<HTMLDivElement>;
+const TRANSFORM_CONTENT_TEST_PROPS = { 'data-testid': 'canvas-transform-content' } as HTMLAttributes<HTMLDivElement>;
 
 const TOUR_STEPS = [
   {
@@ -55,7 +71,17 @@ const TOUR_STEPS = [
   }
 ] as const;
 
-export function Canvas() {
+type CanvasProps = {
+  isMobileLayout?: boolean;
+  hideQuickActions?: boolean;
+  mobileBottomInsetPx?: number;
+};
+
+export function Canvas({
+  isMobileLayout = false,
+  hideQuickActions = false,
+  mobileBottomInsetPx = 0
+}: CanvasProps = {}) {
   const {
     placements,
     bins,
@@ -94,11 +120,18 @@ export function Canvas() {
   const [paintMode, setPaintMode] = useState(false);
   const [paintColorDraft, setPaintColorDraft] = useState(DEFAULT_BIN_COLOR);
   const [paintColorSelection, setPaintColorSelection] = useState<string>(DEFAULT_BIN_COLOR);
+  const [canvasZoom, setCanvasZoom] = useState(1);
+  const [canvasPosition, setCanvasPosition] = useState<Point>({ x: 0, y: 0 });
+  const [quickActionsOpen, setQuickActionsOpen] = useState(() => !isMobileLayout);
+  const [isPanningCanvas, setIsPanningCanvas] = useState(false);
+  const [actionsOffset, setActionsOffset] = useState<Point>({ x: 0, y: 0 });
+  const [isDraggingActions, setIsDraggingActions] = useState(false);
   const [showHowTo, setShowHowTo] = useState(true);
   const [tourActive, setTourActive] = useState(false);
   const [tourStepIndex, setTourStepIndex] = useState(0);
   const [tourTargetRect, setTourTargetRect] = useState<DOMRect | null>(null);
-  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const canvasViewportRef = useRef<HTMLDivElement | null>(null);
+  const transformRef = useRef<ReactZoomPanPinchContentRef | null>(null);
   const dropAreaRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<HTMLDivElement | null>(null);
   const lastFrameRef = useRef<number>(0);
@@ -106,6 +139,14 @@ export function Canvas() {
   const pointerOriginRef = useRef<Point | null>(null);
   const dragOffsetRef = useRef<Point | null>(null);
   const originPlacementRef = useRef<Point | null>(null);
+  const canvasZoomRef = useRef(canvasZoom);
+  const canvasPositionRef = useRef<Point>({ x: 0, y: 0 });
+  const panStateRef = useRef<{ pointerId: number; x: number; y: number; originX: number; originY: number } | null>(null);
+  const actionsDragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
+  const actionsHandleRef = useRef<HTMLButtonElement | null>(null);
+  const wheelZoomRafRef = useRef<number | null>(null);
+  const wheelZoomDeltaRef = useRef(0);
+  const wheelZoomPointerRef = useRef<Point | undefined>(undefined);
 
   useEffect(() => {
     if (!toast) return;
@@ -119,6 +160,79 @@ export function Canvas() {
       setPaintMode(false);
     }
   }, [placements.length]);
+
+  useEffect(() => {
+    setQuickActionsOpen(!isMobileLayout);
+  }, [isMobileLayout]);
+
+  useEffect(() => {
+    setActionsOffset({ x: 0, y: 0 });
+  }, [isMobileLayout]);
+
+  useEffect(() => {
+    canvasZoomRef.current = canvasZoom;
+  }, [canvasZoom]);
+
+  useEffect(() => {
+    canvasPositionRef.current = canvasPosition;
+  }, [canvasPosition]);
+
+  const canvasStageGutterPx = isMobileLayout ? MOBILE_CANVAS_STAGE_GUTTER_PX : DESKTOP_CANVAS_STAGE_GUTTER_PX;
+
+  const clampZoom = useCallback((value: number) => {
+    const clamped = Math.max(MIN_CANVAS_ZOOM, Math.min(MAX_CANVAS_ZOOM, value));
+    return Number(clamped.toFixed(ZOOM_DECIMALS));
+  }, []);
+
+  const zoomCanvas = useCallback(
+    (nextZoom: number, pointer?: Point, animationMs = ZOOM_BUTTON_ANIMATION_MS) => {
+      const viewport = canvasViewportRef.current;
+      const transform = transformRef.current;
+      const previousZoom = canvasZoomRef.current;
+      const targetZoom = clampZoom(nextZoom);
+      if (targetZoom === previousZoom) return;
+
+      if (!viewport || !transform) {
+        canvasZoomRef.current = targetZoom;
+        setCanvasZoom(targetZoom);
+        return;
+      }
+
+      const rect = viewport.getBoundingClientRect();
+      const anchorX = pointer
+        ? Math.min(viewport.clientWidth, Math.max(0, pointer.x - rect.left))
+        : viewport.clientWidth / 2;
+      const anchorY = pointer
+        ? Math.min(viewport.clientHeight, Math.max(0, pointer.y - rect.top))
+        : viewport.clientHeight / 2;
+      const currentPosition = canvasPositionRef.current;
+      const zoomRatio = targetZoom / previousZoom;
+      const nextPositionX = anchorX - (anchorX - currentPosition.x) * zoomRatio;
+      const nextPositionY = anchorY - (anchorY - currentPosition.y) * zoomRatio;
+      transform.setTransform(nextPositionX, nextPositionY, targetZoom, animationMs, 'easeOut');
+    },
+    [clampZoom]
+  );
+
+  const fitCanvasInView = useCallback(() => {
+    const viewport = canvasViewportRef.current;
+    const transform = transformRef.current;
+    if (!viewport || !transform) return;
+    const baseWidth = drawerWidth * GRID_SIZE + CANVAS_PADDING * 2 + canvasStageGutterPx * 2;
+    const baseHeight = drawerLength * GRID_SIZE + CANVAS_PADDING * 2 + canvasStageGutterPx * 2;
+    if (baseWidth <= 0 || baseHeight <= 0) return;
+    const availableWidth = Math.max(120, viewport.clientWidth - 24);
+    const availableHeight = Math.max(120, viewport.clientHeight - 24);
+    const fitZoom = clampZoom(Math.min(availableWidth / baseWidth, availableHeight / baseHeight));
+    transform.centerView(fitZoom, ZOOM_FIT_ANIMATION_MS, 'easeOut');
+  }, [canvasStageGutterPx, clampZoom, drawerLength, drawerWidth]);
+
+  useEffect(() => {
+    const id = window.requestAnimationFrame(() => {
+      fitCanvasInView();
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [fitCanvasInView, drawerWidth, drawerLength, isMobileLayout]);
 
   useEffect(() => {
     if (!activePlacementEditor) return;
@@ -341,6 +455,7 @@ export function Canvas() {
   }, [tourTargetRect]);
 
   const gridSize = GRID_SIZE;
+  const scaledGridSize = GRID_SIZE * canvasZoom;
   const dropAreaSize = useMemo(
     () => ({ widthPx: drawerWidth * gridSize, heightPx: drawerLength * gridSize }),
     [drawerWidth, drawerLength, gridSize]
@@ -351,6 +466,13 @@ export function Canvas() {
       heightPx: dropAreaSize.heightPx + CANVAS_PADDING * 2
     }),
     [dropAreaSize]
+  );
+  const canvasStageSize = useMemo(
+    () => ({
+      widthPx: canvasSize.widthPx + canvasStageGutterPx * 2,
+      heightPx: canvasSize.heightPx + canvasStageGutterPx * 2
+    }),
+    [canvasSize.heightPx, canvasSize.widthPx, canvasStageGutterPx]
   );
 
   const { setNodeRef: setDropNodeRef } = useDroppable({ id: 'drop-area' });
@@ -364,6 +486,208 @@ export function Canvas() {
     if (max - value <= snapValue) return max;
     return applySnap(value);
   };
+
+  const quickActionsAvailable = !(hideQuickActions && isMobileLayout);
+
+  const startActionsDrag = useCallback(
+    (clientX: number, clientY: number) => {
+      actionsDragRef.current = {
+        startX: clientX,
+        startY: clientY,
+        originX: actionsOffset.x,
+        originY: actionsOffset.y
+      };
+      setIsDraggingActions(true);
+    },
+    [actionsOffset.x, actionsOffset.y]
+  );
+
+  const handleActionsDragStart = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    startActionsDrag(event.clientX, event.clientY);
+    event.preventDefault();
+  };
+
+  const handleActionsMouseDown = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    startActionsDrag(event.clientX, event.clientY);
+    event.preventDefault();
+  };
+
+  const shouldStartActionsDragFromTarget = (target: EventTarget | null) => {
+    if (target instanceof Element) {
+      return !!target.closest('[data-testid="quick-actions-drag-handle"]');
+    }
+    if (target instanceof Node) {
+      return !!target.parentElement?.closest('[data-testid="quick-actions-drag-handle"]');
+    }
+    return false;
+  };
+
+  const handleActionsContainerPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!shouldStartActionsDragFromTarget(event.target)) return;
+    startActionsDrag(event.clientX, event.clientY);
+    event.preventDefault();
+  };
+
+  const handleActionsContainerMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!shouldStartActionsDragFromTarget(event.target)) return;
+    startActionsDrag(event.clientX, event.clientY);
+    event.preventDefault();
+  };
+
+  useEffect(() => {
+    const handle = actionsHandleRef.current;
+    if (!handle) return;
+    const handleMouseDown = (event: MouseEvent) => {
+      if (event.button !== 0) return;
+      startActionsDrag(event.clientX, event.clientY);
+      event.preventDefault();
+    };
+    handle.addEventListener('mousedown', handleMouseDown);
+    return () => handle.removeEventListener('mousedown', handleMouseDown);
+  }, [startActionsDrag]);
+
+  useEffect(() => {
+    const handleMove = (event: PointerEvent | MouseEvent) => {
+      const drag = actionsDragRef.current;
+      if (!drag) return;
+      setActionsOffset({
+        x: drag.originX + (event.clientX - drag.startX),
+        y: drag.originY + (event.clientY - drag.startY)
+      });
+    };
+    const handleEnd = () => {
+      const drag = actionsDragRef.current;
+      if (!drag) return;
+      actionsDragRef.current = null;
+      setIsDraggingActions(false);
+    };
+
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('mouseup', handleEnd);
+    window.addEventListener('pointerup', handleEnd);
+    window.addEventListener('pointercancel', handleEnd);
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('mouseup', handleEnd);
+      window.removeEventListener('pointerup', handleEnd);
+      window.removeEventListener('pointercancel', handleEnd);
+    };
+  }, []);
+
+  const shouldStartCanvasPan = useCallback((target: EventTarget | null) => {
+    if (!(target instanceof HTMLElement)) return false;
+    if (target.closest('[data-testid="placed-bin"]')) return false;
+    if (target.closest('[data-testid="placement-editor"]')) return false;
+    if (target.closest('button, input, select, textarea, a, [role="button"], [contenteditable="true"]')) {
+      return false;
+    }
+    return true;
+  }, []);
+
+  const handleCanvasPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (tourActive || paintMode || event.pointerType === 'touch' || event.button !== 0) return;
+    if (!shouldStartCanvasPan(event.target)) return;
+    panStateRef.current = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      originX: canvasPositionRef.current.x,
+      originY: canvasPositionRef.current.y
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setIsPanningCanvas(true);
+    event.preventDefault();
+  };
+
+  const handleCanvasPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const pan = panStateRef.current;
+    const transform = transformRef.current;
+    if (!pan || !transform || pan.pointerId !== event.pointerId) return;
+    const deltaX = event.clientX - pan.x;
+    const deltaY = event.clientY - pan.y;
+    transform.setTransform(pan.originX + deltaX, pan.originY + deltaY, canvasZoomRef.current, 0);
+  };
+
+  const handleCanvasPointerEnd = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const pan = panStateRef.current;
+    if (!pan || pan.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    panStateRef.current = null;
+    setIsPanningCanvas(false);
+  };
+
+  const handleWheelZoom = useCallback((event: WheelEvent) => {
+    if (tourActive || paintMode) return;
+    if (!shouldStartCanvasPan(event.target)) return;
+    event.preventDefault();
+    const normalizedDeltaY = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
+    wheelZoomDeltaRef.current += normalizedDeltaY;
+    wheelZoomPointerRef.current = { x: event.clientX, y: event.clientY };
+    if (wheelZoomRafRef.current != null) return;
+    wheelZoomRafRef.current = window.requestAnimationFrame(() => {
+      const deltaY = wheelZoomDeltaRef.current;
+      const anchor = wheelZoomPointerRef.current;
+      wheelZoomDeltaRef.current = 0;
+      wheelZoomPointerRef.current = undefined;
+      wheelZoomRafRef.current = null;
+      const zoomFactor = Math.exp(-deltaY * WHEEL_ZOOM_SENSITIVITY);
+      zoomCanvas(canvasZoomRef.current * zoomFactor, anchor, 0);
+    });
+  }, [paintMode, shouldStartCanvasPan, tourActive, zoomCanvas]);
+
+  useEffect(() => {
+    const viewport = canvasViewportRef.current;
+    if (!viewport) return;
+    // Use a native non-passive listener so wheel zoom can cancel page scrolling.
+    viewport.addEventListener('wheel', handleWheelZoom, { passive: false });
+    return () => {
+      viewport.removeEventListener('wheel', handleWheelZoom);
+    };
+  }, [handleWheelZoom]);
+
+  useEffect(() => {
+    return () => {
+      if (wheelZoomRafRef.current != null) {
+        window.cancelAnimationFrame(wheelZoomRafRef.current);
+      }
+    };
+  }, []);
+
+  const handleCanvasInit = useCallback((ref: ReactZoomPanPinchRef) => {
+    transformRef.current = ref;
+    const { scale, positionX, positionY } = ref.state;
+    canvasZoomRef.current = scale;
+    canvasPositionRef.current = { x: positionX, y: positionY };
+    setCanvasZoom(scale);
+    setCanvasPosition({ x: positionX, y: positionY });
+    window.requestAnimationFrame(() => fitCanvasInView());
+  }, [fitCanvasInView]);
+
+  const handleCanvasTransformed = useCallback(
+    (_ref: ReactZoomPanPinchRef, state: { scale: number; positionX: number; positionY: number }) => {
+      const nextScale = clampZoom(state.scale);
+      canvasZoomRef.current = nextScale;
+      canvasPositionRef.current = { x: state.positionX, y: state.positionY };
+      setCanvasZoom(nextScale);
+      setCanvasPosition({ x: state.positionX, y: state.positionY });
+    },
+    [clampZoom]
+  );
+
+  const getDrawerScalePx = useCallback(() => {
+    const dropArea = dropAreaRef.current;
+    if (!dropArea || drawerWidth <= 0 || drawerLength <= 0) return null;
+    const rect = dropArea.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
+    return {
+      x: rect.width / drawerWidth,
+      y: rect.height / drawerLength
+    };
+  }, [drawerLength, drawerWidth]);
 
   const getPlacementSize = useCallback(
     (placement: Placement) => {
@@ -457,9 +781,11 @@ export function Canvas() {
   const computeDropPosition = (point: Point, drag: DragItem) => {
     if (!dropAreaRef.current) return null;
     const rect = dropAreaRef.current.getBoundingClientRect();
+    const scalePx = getDrawerScalePx();
+    if (!scalePx) return null;
     const offset = dragOffsetRef.current ?? { x: 0, y: 0 };
-    const rawX = (point.x - rect.left - offset.x) / gridSize;
-    const rawY = (point.y - rect.top - offset.y) / gridSize;
+    const rawX = (point.x - rect.left - offset.x) / scalePx.x;
+    const rawY = (point.y - rect.top - offset.y) / scalePx.y;
     const size =
       drag.type === 'bin'
         ? (() => {
@@ -493,8 +819,9 @@ export function Canvas() {
     if (!placement) return null;
     const size = getPlacementSize(placement);
     if (!size) return null;
-    const rawX = originPlacementRef.current.x + delta.x / gridSize;
-    const rawY = originPlacementRef.current.y + delta.y / gridSize;
+    const scalePx = getDrawerScalePx() ?? { x: scaledGridSize, y: scaledGridSize };
+    const rawX = originPlacementRef.current.x + delta.x / scalePx.x;
+    const rawY = originPlacementRef.current.y + delta.y / scalePx.y;
     const maxX = Math.max(0, drawerWidth - size.width);
     const maxY = Math.max(0, drawerLength - size.length);
     const isOutOfBounds =
@@ -587,9 +914,12 @@ export function Canvas() {
       if (drag.type === 'placement' && startPoint) {
         const placement = placements.find((p) => p.id === drag.placementId);
         const dropRect = dropAreaRef.current?.getBoundingClientRect();
+        const scalePx = getDrawerScalePx();
         if (placement && dropRect) {
-          const topLeftX = dropRect.left + placement.x * gridSize;
-          const topLeftY = dropRect.top + placement.y * gridSize;
+          const unitX = scalePx?.x ?? scaledGridSize;
+          const unitY = scalePx?.y ?? scaledGridSize;
+          const topLeftX = dropRect.left + placement.x * unitX;
+          const topLeftY = dropRect.top + placement.y * unitY;
           dragOffsetRef.current = { x: startPoint.x - topLeftX, y: startPoint.y - topLeftY };
         } else {
           dragOffsetRef.current = null;
@@ -630,8 +960,9 @@ export function Canvas() {
       const delta = getDragDelta(event);
       debugLog('drag move delta (px)', { x: delta.x, y: delta.y });
       if (activeDragRef.current.type === 'placement' && originPlacementRef.current) {
-        const expectedX = originPlacementRef.current.x + delta.x / gridSize;
-        const expectedY = originPlacementRef.current.y + delta.y / gridSize;
+        const scalePx = getDrawerScalePx() ?? { x: scaledGridSize, y: scaledGridSize };
+        const expectedX = originPlacementRef.current.x + delta.x / scalePx.x;
+        const expectedY = originPlacementRef.current.y + delta.y / scalePx.y;
         debugLog('expected moved placement position (in)', { x: expectedX, y: expectedY });
         const drop = computePlacementTargetFromDelta(delta, activeDragRef.current);
         if (drop) {
@@ -679,106 +1010,156 @@ export function Canvas() {
     <div className={`flex-1 bg-[#F6F7F8] relative overflow-hidden flex flex-col ${paintMode ? 'cursor-copy' : ''}`}>
       {/* Canvas Area */}
       <div
-        ref={scrollContainerRef}
-        className="flex-1 flex items-center justify-center p-12 overflow-auto"
+        data-testid="canvas-scroll-container"
+        data-canvas-scale={canvasZoom.toFixed(3)}
+        data-canvas-x={canvasPosition.x.toFixed(1)}
+        data-canvas-y={canvasPosition.y.toFixed(1)}
+        className={`flex-1 ${isMobileLayout ? 'p-4 pt-5 hide-scrollbar' : 'p-12'}`}
+        style={isMobileLayout && mobileBottomInsetPx > 0 ? { paddingBottom: `${mobileBottomInsetPx}px` } : undefined}
       >
         <div
-          className="bg-slate-100/70 rounded-lg shadow-xl border border-slate-900/[0.06] relative transition-transform duration-200"
-          style={{
-            width: `${canvasSize.widthPx}px`,
-            height: `${canvasSize.heightPx}px`
-          }}
+          ref={canvasViewportRef}
+          className={`h-full w-full ${paintMode ? 'cursor-copy' : isPanningCanvas ? 'cursor-grabbing' : 'cursor-grab'}`}
+          onPointerDown={handleCanvasPointerDown}
+          onPointerMove={handleCanvasPointerMove}
+          onPointerUp={handleCanvasPointerEnd}
+          onPointerCancel={handleCanvasPointerEnd}
+          onLostPointerCapture={handleCanvasPointerEnd}
         >
-          <div
-            className="absolute z-10"
-            style={{
-              left: CANVAS_PADDING + dropAreaSize.widthPx / 2,
-              top: LABEL_ZONE,
-              transform: 'translate(-50%, -50%)'
-            }}
+          <TransformWrapper
+            minScale={MIN_CANVAS_ZOOM}
+            maxScale={MAX_CANVAS_ZOOM}
+            centerOnInit
+            centerZoomedOut={false}
+            limitToBounds={false}
+            disablePadding
+            smooth
+            disabled={tourActive}
+            panning={{ disabled: true }}
+            wheel={{ disabled: true }}
+            pinch={{ step: 5 }}
+            doubleClick={{ disabled: true }}
+            onInit={handleCanvasInit}
+            onTransformed={handleCanvasTransformed}
           >
-            <div className="text-xs font-medium text-slate-400 bg-white px-2 py-1 rounded-full shadow-sm">
-              {drawerWidth}" Width
-            </div>
-          </div>
-          <div
-            className="absolute z-10"
-            style={{
-              left: LABEL_ZONE,
-              top: CANVAS_PADDING + dropAreaSize.heightPx / 2,
-              transform: 'translate(-50%, -50%)'
-            }}
-          >
-            <div className="text-xs font-medium text-slate-400 bg-white px-2 py-1 rounded-full shadow-sm -rotate-90">
-              {drawerLength}" Length
-            </div>
-          </div>
-
-          <div
-            ref={attachDropAreaRef}
-            className="absolute bg-white shadow-inner"
-            style={{
-              left: CANVAS_PADDING,
-              top: CANVAS_PADDING,
-              width: `${dropAreaSize.widthPx}px`,
-              height: `${dropAreaSize.heightPx}px`
-            }}
-            data-testid="canvas-drop-area"
-            data-tour="canvas-drop-zone"
-          >
-            {showGrid && (
+            <TransformComponent
+              wrapperClass="h-full w-full !overflow-hidden"
+              contentClass="!w-fit !h-fit"
+              wrapperProps={TRANSFORM_WRAPPER_TEST_PROPS}
+              contentProps={TRANSFORM_CONTENT_TEST_PROPS}
+            >
               <div
-                data-testid="grid-overlay"
-                className="absolute inset-0 pointer-events-none opacity-25"
+                className="relative shrink-0"
                 style={{
-                  backgroundImage:
-                    'linear-gradient(#14476B 1px, transparent 1px), linear-gradient(90deg, #14476B 1px, transparent 1px)',
-                  backgroundSize: `${gridStepPx}px ${gridStepPx}px`
+                  width: `${canvasStageSize.widthPx}px`,
+                  height: `${canvasStageSize.heightPx}px`
                 }}
-              />
-            )}
-
-            {placements.map((placement) => {
-              const size = getPlacementSize(placement);
-              if (!size) return null;
-              return (
-                <DraggablePlacement
-                  key={placement.id}
-                  placement={placement}
-                  size={size}
-                  gridSize={gridSize}
-                  dragStatus={dragStatus}
-                  paintMode={paintMode}
-                  isInvalid={invalidPlacementIds.has(placement.id)}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    if (paintMode) {
-                      paintPlacement(placement.id);
-                      return;
-                    }
-                    setEditor({ placementIds: [placement.id], x: event.clientX, y: event.clientY });
-                    closePlacementEditor();
+              >
+                <div
+                  className="absolute bg-slate-100/70 rounded-lg shadow-xl border border-slate-900/[0.06]"
+                  style={{
+                    left: `${canvasStageGutterPx}px`,
+                    top: `${canvasStageGutterPx}px`,
+                    width: `${canvasSize.widthPx}px`,
+                    height: `${canvasSize.heightPx}px`
                   }}
-                />
-              );
-            })}
+                >
+                  <div
+                    className="absolute z-10 pointer-events-none"
+                    style={{
+                      left: CANVAS_PADDING + dropAreaSize.widthPx / 2,
+                      top: LABEL_ZONE,
+                      transform: 'translate(-50%, -50%)'
+                    }}
+                  >
+                    <div className="text-xs font-medium text-slate-400 bg-white px-2 py-1 rounded-full shadow-sm whitespace-nowrap">
+                      {drawerWidth}" Width
+                    </div>
+                  </div>
+                  <div
+                    className="absolute z-10 pointer-events-none"
+                    style={{
+                      left: LABEL_ZONE,
+                      top: CANVAS_PADDING + dropAreaSize.heightPx / 2,
+                      transform: 'translate(-50%, -50%)'
+                    }}
+                  >
+                    <div className="text-xs font-medium text-slate-400 bg-white px-2 py-1 rounded-full shadow-sm -rotate-90 whitespace-nowrap">
+                      {drawerLength}" Length
+                    </div>
+                  </div>
 
-            {placements.length === 0 && (
-              <div className="absolute bottom-4 right-4 text-xs text-slate-400 italic pointer-events-none">
-                Drag bins here
+                  <div
+                    ref={attachDropAreaRef}
+                    className="absolute bg-white shadow-inner"
+                    style={{
+                      left: CANVAS_PADDING,
+                      top: CANVAS_PADDING,
+                      width: `${dropAreaSize.widthPx}px`,
+                      height: `${dropAreaSize.heightPx}px`
+                    }}
+                    data-testid="canvas-drop-area"
+                    data-tour="canvas-drop-zone"
+                  >
+                    {showGrid && (
+                      <div
+                        data-testid="grid-overlay"
+                        className="absolute inset-0 pointer-events-none opacity-25"
+                        style={{
+                          backgroundImage:
+                            'linear-gradient(#14476B 1px, transparent 1px), linear-gradient(90deg, #14476B 1px, transparent 1px)',
+                          backgroundSize: `${gridStepPx}px ${gridStepPx}px`
+                        }}
+                      />
+                    )}
+
+                    {placements.map((placement) => {
+                      const size = getPlacementSize(placement);
+                      if (!size) return null;
+                      return (
+                        <DraggablePlacement
+                          key={placement.id}
+                          placement={placement}
+                          size={size}
+                          gridSize={gridSize}
+                          dragStatus={dragStatus}
+                          paintMode={paintMode}
+                          isInvalid={invalidPlacementIds.has(placement.id)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            if (paintMode) {
+                              paintPlacement(placement.id);
+                              return;
+                            }
+                            setEditor({ placementIds: [placement.id], x: event.clientX, y: event.clientY });
+                            closePlacementEditor();
+                          }}
+                        />
+                      );
+                    })}
+
+                    {placements.length === 0 && (
+                      <div className="absolute bottom-4 right-4 text-xs text-slate-400 italic pointer-events-none">
+                        Drag bins here
+                      </div>
+                    )}
+
+                    <div className="absolute inset-0 pointer-events-none border-2 border-slate-300" />
+                  </div>
+                </div>
               </div>
-            )}
-
-            <div className="absolute inset-0 pointer-events-none border-2 border-slate-300" />
-
-          </div>
+            </TransformComponent>
+          </TransformWrapper>
         </div>
       </div>
+      
 
       {!tourActive && showHowTo && (
         <div
           data-testid="canvas-how-to"
-          className="absolute top-4 left-4 z-40 w-80 rounded-xl border border-slate-200 bg-white/95 shadow-lg backdrop-blur p-4"
+          className={`absolute top-4 left-4 z-40 rounded-xl border border-slate-200 bg-white/95 shadow-lg backdrop-blur p-4 ${
+            isMobileLayout ? 'w-[calc(100%-2rem)] max-w-sm' : 'w-80'
+          }`}
         >
           <div className="flex items-start justify-between gap-4">
             <div>
@@ -811,7 +1192,9 @@ export function Canvas() {
       {!tourActive && !showHowTo && (
         <div
           data-testid="canvas-how-to-collapsed"
-          className="absolute top-4 left-4 z-40 rounded-full border border-slate-200 bg-white/95 shadow-md backdrop-blur px-3 py-2 flex items-center gap-3"
+          className={`absolute top-4 left-4 z-40 rounded-full border border-slate-200 bg-white/95 shadow-md backdrop-blur px-3 py-2 flex items-center gap-3 ${
+            isMobileLayout ? 'max-w-[calc(100%-2rem)]' : ''
+          }`}
         >
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">How To Start</p>
           <button
@@ -824,132 +1207,258 @@ export function Canvas() {
         </div>
       )}
 
-      <div
-        data-tour="quick-actions-pill"
-        className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-white/90 backdrop-blur shadow-lg border border-slate-200 rounded-2xl px-4 py-2 flex items-start gap-5"
-      >
-        <div className="flex flex-col items-center gap-1">
-          <span className="text-xs uppercase tracking-wide text-slate-400">History</span>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={undo}
-              disabled={!canUndo}
-              title="Undo (Ctrl/Cmd+Z)"
-              className="p-2 hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600"
-            >
-              <RotateCcw className="h-4 w-4" />
-            </button>
-            <button
-              onClick={redo}
-              disabled={!canRedo}
-              title="Redo (Shift+Ctrl/Cmd+Z)"
-              className="p-2 hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600"
-            >
-              <RotateCw className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-
-        <div className="w-px bg-slate-200 self-stretch my-1" />
-
-        <div className="flex flex-col items-center gap-1">
-          <span className="text-xs uppercase tracking-wide text-slate-400">Grid</span>
+      {quickActionsAvailable && quickActionsOpen && (
+        <div
+          data-tour="quick-actions-pill"
+          data-actions-offset-x={actionsOffset.x.toFixed(1)}
+          data-actions-offset-y={actionsOffset.y.toFixed(1)}
+          onPointerDownCapture={handleActionsContainerPointerDown}
+          onMouseDownCapture={handleActionsContainerMouseDown}
+          className={
+            isMobileLayout
+              ? 'absolute bottom-3 left-2 right-2 bg-white/90 backdrop-blur shadow-lg border border-slate-200 rounded-2xl px-3 py-2 flex flex-wrap justify-center gap-3 relative'
+              : 'absolute bottom-6 left-1/2 -translate-x-1/2 bg-white/90 backdrop-blur shadow-lg border border-slate-200 rounded-2xl px-4 py-2 flex items-start gap-5 relative'
+          }
+          style={
+            isMobileLayout
+              ? { transform: `translate(${actionsOffset.x}px, ${actionsOffset.y}px)` }
+              : { transform: `translate(-50%, 0) translate(${actionsOffset.x}px, ${actionsOffset.y}px)` }
+          }
+        >
           <button
-            onClick={() => setShowGrid(!showGrid)}
-            title="Toggle grid"
-            className={`p-2 rounded-full transition-colors ${
-              showGrid ? 'bg-[#14476B]/10 text-[#14476B]' : 'hover:bg-slate-100 text-slate-600'
-            }`}
+            type="button"
+            ref={actionsHandleRef}
+            data-testid="quick-actions-drag-handle"
+            aria-label="Drag quick actions"
+            title="Drag quick actions"
+            onPointerDown={handleActionsDragStart}
+            onMouseDown={handleActionsMouseDown}
+            onDoubleClick={() => setActionsOffset({ x: 0, y: 0 })}
+            className={`absolute -top-3 left-1/2 -translate-x-1/2 h-6 px-2 rounded-full border border-slate-200 bg-white text-slate-500 flex items-center justify-center ${
+              isDraggingActions ? 'cursor-grabbing' : 'cursor-grab'
+            } touch-none`}
           >
-            <Grid className="h-4 w-4" />
+            <GripHorizontal className="h-3.5 w-3.5" />
           </button>
-        </div>
-
-        <div className="w-px bg-slate-200 self-stretch my-1" />
-
-        <div className="flex flex-col items-center gap-1">
-          <span className="text-xs uppercase tracking-wide text-slate-400">Grid Size</span>
-          <input
-            aria-label="Snap to grid"
-            title="Snap to the nearest grid line (inches)"
-            type="number"
-            min={0.5}
-            max={2}
-            step={0.5}
-            value={snap}
-            onChange={(e) => setSnap(clampSnap(Number(e.target.value) || 0.5))}
-            className="w-14 px-2 py-1 text-xs rounded-md border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#14476B]/20"
-          />
-        </div>
-
-        <div className="w-px bg-slate-200 self-stretch my-1" />
-
-        <div data-tour="canvas-actions" className="flex flex-col items-center gap-1">
-          <span className="text-xs uppercase tracking-wide text-slate-400">Actions</span>
-          <div className="flex items-center gap-1">
-            <Button
-              data-testid="suggest-layout-button"
-              size="sm"
-              variant="ghost"
-              className="text-[#14476B]"
-              leftIcon={<Sparkles className="h-3 w-3" />}
-              onClick={handleSuggestLayout}
-              disabled={placements.length === 0}
-            >
-              Suggest Layout
-            </Button>
-            <Button
-              data-testid="clear-layout-button"
-              size="sm"
-              variant="ghost"
-              className="text-slate-600"
-              leftIcon={<Trash2 className="h-3 w-3" />}
-              onClick={clearPlacements}
-              disabled={placements.length === 0}
-            >
-              Clear
-            </Button>
-            <Button
-              data-testid="paint-mode-toggle"
-              data-tour="paint-action"
-              size="sm"
-              variant="ghost"
-              className={paintMode ? 'text-[#14476B] bg-[#14476B]/10' : 'text-slate-600'}
-              leftIcon={<PaintBucket className="h-3 w-3" />}
-              onClick={togglePaintMode}
-              disabled={placements.length === 0}
-              aria-label={paintMode ? 'Disable paint mode' : 'Enable paint mode'}
-            >
-              {paintMode ? '' : 'Paint Bins'}
-            </Button>
-            {paintMode && (
-              <select
-                data-testid="paint-color-select"
-                value={paintColorSelection}
-                onChange={(e) => handlePaintColorSelectionChange(e.target.value)}
-                className="w-28 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#14476B]/20"
+          <div className="flex flex-col items-center gap-1">
+            <span className="text-xs uppercase tracking-wide text-slate-400">History</span>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={undo}
+                disabled={!canUndo}
+                title="Undo (Ctrl/Cmd+Z)"
+                className={`hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600 ${
+                  isMobileLayout ? 'h-11 w-11' : 'p-2'
+                }`}
               >
-                {PRESET_COLORS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-                <option value={CUSTOM_COLOR_VALUE}>Custom</option>
-              </select>
-            )}
-            {paintMode && paintColorSelection === CUSTOM_COLOR_VALUE && (
-              <input
-                data-testid="paint-color-custom"
-                aria-label="Paint custom color"
-                type="color"
-                value={paintColorDraft}
-                onChange={(e) => handlePaintColorChange(e.target.value)}
-                className="h-7 w-10 rounded-md border border-slate-200 bg-white"
-              />
-            )}
+                <RotateCcw className="h-4 w-4" />
+              </button>
+              <button
+                onClick={redo}
+                disabled={!canRedo}
+                title="Redo (Shift+Ctrl/Cmd+Z)"
+                className={`hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600 ${
+                  isMobileLayout ? 'h-11 w-11' : 'p-2'
+                }`}
+              >
+                <RotateCw className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
+          <div className={`w-px bg-slate-200 self-stretch my-1 ${isMobileLayout ? 'hidden' : ''}`} />
+
+          <div className="flex flex-col items-center gap-1">
+            <span className="text-xs uppercase tracking-wide text-slate-400">Grid</span>
+            <button
+              onClick={() => setShowGrid(!showGrid)}
+              title="Toggle grid"
+              className={`rounded-full transition-colors ${isMobileLayout ? 'h-11 w-11' : 'p-2'} ${
+                showGrid ? 'bg-[#14476B]/10 text-[#14476B]' : 'hover:bg-slate-100 text-slate-600'
+              }`}
+            >
+              <Grid className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className={`w-px bg-slate-200 self-stretch my-1 ${isMobileLayout ? 'hidden' : ''}`} />
+
+          <div className="flex flex-col items-center gap-1">
+            <span className="text-xs uppercase tracking-wide text-slate-400">Grid Size</span>
+            <input
+              aria-label="Snap to grid"
+              title="Snap to the nearest grid line (inches)"
+              type="number"
+              min={0.5}
+              max={2}
+              step={0.5}
+              value={snap}
+              onChange={(e) => setSnap(clampSnap(Number(e.target.value) || 0.5))}
+              className={`w-14 px-2 ${isMobileLayout ? 'py-2 min-h-10' : 'py-1'} text-xs rounded-md border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#14476B]/20`}
+            />
+          </div>
+
+          <div className={`w-px bg-slate-200 self-stretch my-1 ${isMobileLayout ? 'hidden' : ''}`} />
+
+          <div className="flex flex-col items-center gap-1">
+            <span className="text-xs uppercase tracking-wide text-slate-400">Zoom</span>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                aria-label="Zoom out"
+                title="Zoom out"
+                disabled={canvasZoom <= MIN_CANVAS_ZOOM}
+                onClick={() => zoomCanvas(canvasZoomRef.current - 0.1)}
+                className={`hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600 ${
+                  isMobileLayout ? 'h-11 w-11' : 'p-2'
+                }`}
+              >
+                <ZoomOut className="h-4 w-4" />
+              </button>
+              <span className="w-12 text-center text-xs font-medium text-slate-600">
+                <span data-testid="canvas-zoom-value">
+                {Math.round(canvasZoom * 100)}%
+                </span>
+              </span>
+              <button
+                type="button"
+                aria-label="Zoom in"
+                title="Zoom in"
+                disabled={canvasZoom >= MAX_CANVAS_ZOOM}
+                onClick={() => zoomCanvas(canvasZoomRef.current + 0.1)}
+                className={`hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600 ${
+                  isMobileLayout ? 'h-11 w-11' : 'p-2'
+                }`}
+              >
+                <ZoomIn className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
+          <div className={`w-px bg-slate-200 self-stretch my-1 ${isMobileLayout ? 'hidden' : ''}`} />
+
+          <div data-tour="canvas-actions" className="flex flex-col items-center gap-1">
+            <span className="text-xs uppercase tracking-wide text-slate-400">Actions</span>
+            <div className="flex items-center gap-1">
+              <Button
+                data-testid="home-canvas-button"
+                size="sm"
+                variant="ghost"
+                className={`text-slate-700 ${isMobileLayout ? 'min-h-10 px-3' : ''}`}
+                leftIcon={<House className="h-3 w-3" />}
+                onClick={fitCanvasInView}
+              >
+                {isMobileLayout ? 'Home' : 'Home Canvas'}
+              </Button>
+              <Button
+                data-testid="suggest-layout-button"
+                size="sm"
+                variant="ghost"
+                className={`text-[#14476B] ${isMobileLayout ? 'min-h-10 px-3' : ''}`}
+                leftIcon={<Sparkles className="h-3 w-3" />}
+                onClick={handleSuggestLayout}
+                disabled={placements.length === 0}
+              >
+                Suggest Layout
+              </Button>
+              <Button
+                data-testid="clear-layout-button"
+                size="sm"
+                variant="ghost"
+                className={`text-slate-600 ${isMobileLayout ? 'min-h-10 px-3' : ''}`}
+                leftIcon={<Trash2 className="h-3 w-3" />}
+                onClick={clearPlacements}
+                disabled={placements.length === 0}
+              >
+                Clear
+              </Button>
+              <Button
+                data-testid="paint-mode-toggle"
+                data-tour="paint-action"
+                size="sm"
+                variant="ghost"
+                className={`${paintMode ? 'text-[#14476B] bg-[#14476B]/10' : 'text-slate-600'} ${isMobileLayout ? 'min-h-10 px-3' : ''}`}
+                leftIcon={<PaintBucket className="h-3 w-3" />}
+                onClick={togglePaintMode}
+                disabled={placements.length === 0}
+                aria-label={paintMode ? 'Disable paint mode' : 'Enable paint mode'}
+              >
+                {paintMode ? '' : 'Paint Bins'}
+              </Button>
+              {paintMode && (
+                <select
+                  data-testid="paint-color-select"
+                  value={paintColorSelection}
+                  onChange={(e) => handlePaintColorSelectionChange(e.target.value)}
+                  className={`w-28 rounded-md border border-slate-200 px-2 ${isMobileLayout ? 'py-2 min-h-10' : 'py-1'} text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#14476B]/20`}
+                >
+                  {PRESET_COLORS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                  <option value={CUSTOM_COLOR_VALUE}>Custom</option>
+                </select>
+              )}
+              {paintMode && paintColorSelection === CUSTOM_COLOR_VALUE && (
+                <input
+                  data-testid="paint-color-custom"
+                  aria-label="Paint custom color"
+                  type="color"
+                  value={paintColorDraft}
+                  onChange={(e) => handlePaintColorChange(e.target.value)}
+                  className="h-7 w-10 rounded-md border border-slate-200 bg-white"
+                />
+              )}
+            </div>
+          </div>
+
+          <div className={`w-px bg-slate-200 self-stretch my-1 ${isMobileLayout ? 'hidden' : ''}`} />
+
+          <div className="flex items-center">
+            <button
+              type="button"
+              data-testid="quick-actions-toggle"
+              aria-expanded={quickActionsOpen}
+              aria-label="Collapse quick actions"
+              title="Collapse quick actions"
+              onClick={() => setQuickActionsOpen(false)}
+              className={`rounded-full text-slate-600 hover:bg-slate-100 flex items-center justify-center gap-1 ${
+                isMobileLayout ? 'h-11 px-3' : 'p-2'
+              }`}
+            >
+              <ChevronDown className="h-4 w-4" />
+              {isMobileLayout && <span className="text-xs font-semibold uppercase tracking-wide">Hide</span>}
+            </button>
           </div>
         </div>
-      </div>
+      )}
+
+      {quickActionsAvailable && !quickActionsOpen && (
+        <button
+          type="button"
+          data-testid="quick-actions-toggle"
+          data-actions-offset-x={actionsOffset.x.toFixed(1)}
+          data-actions-offset-y={actionsOffset.y.toFixed(1)}
+          aria-expanded={quickActionsOpen}
+          aria-label="Expand quick actions"
+          title="Expand quick actions"
+          onClick={() => setQuickActionsOpen(true)}
+          className={`absolute z-30 rounded-full border border-slate-200 bg-white/95 backdrop-blur shadow-md text-slate-700 flex items-center gap-2 ${
+            isMobileLayout
+              ? 'bottom-20 right-3 px-3 h-11'
+              : 'bottom-6 left-1/2 -translate-x-1/2 px-3 h-10'
+          }`}
+          style={
+            isMobileLayout
+              ? { transform: `translate(${actionsOffset.x}px, ${actionsOffset.y}px)` }
+              : { transform: `translate(-50%, 0) translate(${actionsOffset.x}px, ${actionsOffset.y}px)` }
+          }
+        >
+          <ChevronUp className="h-4 w-4" />
+          <span className="text-xs font-semibold uppercase tracking-wide">Actions</span>
+        </button>
+      )}
 
       {editor && editorPosition && selectedPlacement && selectedSize && (
         <div

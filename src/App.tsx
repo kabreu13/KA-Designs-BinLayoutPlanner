@@ -1,4 +1,3 @@
-import React from 'react';
 import { Header } from './components/Header';
 import { Workspace } from './pages/Workspace';
 import { LayoutProvider } from './context/LayoutContext';

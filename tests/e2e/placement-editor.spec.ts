@@ -2,9 +2,19 @@ import './coverage';
 import { test, expect } from '@playwright/test';
 import { ensureCatalogExpanded, getStoredPlacements } from './helpers';
 
+const dismissHowToIfVisible = async (page: import('@playwright/test').Page) => {
+  const howTo = page.getByTestId('canvas-how-to');
+  if ((await howTo.count()) === 0) return;
+  const hideButton = howTo.getByRole('button', { name: 'Hide' });
+  if (await hideButton.isVisible()) {
+    await hideButton.click();
+  }
+};
+
 test('placed bin editor updates label, color, and size', async ({ page }) => {
   await page.goto('/');
   await ensureCatalogExpanded(page);
+  await dismissHowToIfVisible(page);
 
   await page.locator('[data-testid="bin-card"]').first().click();
   const placed = page.getByTestId('placed-bin').first();
@@ -39,6 +49,7 @@ test('placed bin editor updates label, color, and size', async ({ page }) => {
 test('resize allows out-of-bounds bins with red border', async ({ page }) => {
   await page.goto('/');
   await ensureCatalogExpanded(page);
+  await dismissHowToIfVisible(page);
 
   await page.getByTestId('drawer-width-input').fill('4');
   await page.getByTestId('drawer-length-input').fill('4');
@@ -78,6 +89,7 @@ test('resize allows overlapping bins with red borders', async ({ page }) => {
   }, layout);
 
   await page.goto('/');
+  await dismissHowToIfVisible(page);
 
   const placed = page.getByTestId('placed-bin');
   await expect(placed).toHaveCount(2);

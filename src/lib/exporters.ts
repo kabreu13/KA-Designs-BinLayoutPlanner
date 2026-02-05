@@ -49,6 +49,7 @@ type PdfDoc = {
   line: (x1: number, y1: number, x2: number, y2: number) => void;
   addImage: (imageData: string, format: 'PNG' | 'JPEG', x: number, y: number, width: number, height: number) => void;
   splitTextToSize: (text: string, maxWidth: number) => string[];
+  output: (type: 'blob') => Blob;
 };
 
 const PAGE_MARGIN_MM = 14;
@@ -205,7 +206,8 @@ export async function exportLayoutToPdf(
   drawerLength: number,
   placements: Placement[],
   bins: Bin[],
-  layoutTitle = ''
+  layoutTitle = '',
+  options?: { mode?: 'save' | 'blob' }
 ) {
   const { default: jsPDF } = await import('jspdf');
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' }) as unknown as PdfDoc;
@@ -379,5 +381,8 @@ export async function exportLayoutToPdf(
   });
 
   addFooterPageNumbers(doc, pageWidth, pageHeight);
+  if (options?.mode === 'blob') {
+    return doc.output('blob');
+  }
   doc.save('bin-layout.pdf');
 }

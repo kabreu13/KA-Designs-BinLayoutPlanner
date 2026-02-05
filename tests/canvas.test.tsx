@@ -1,11 +1,25 @@
 /* @vitest-environment jsdom */
-import React from 'react';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { DndContext } from '@dnd-kit/core';
 import { LayoutProvider, useLayout } from '../src/context/LayoutContext';
 import { Canvas } from '../src/components/Canvas';
 import { SummaryPanel } from '../src/components/SummaryPanel';
+
+if (!('ResizeObserver' in globalThis)) {
+  class ResizeObserverMock {
+    observe() {
+      // no-op for jsdom unit tests
+    }
+    unobserve() {
+      // no-op for jsdom unit tests
+    }
+    disconnect() {
+      // no-op for jsdom unit tests
+    }
+  }
+  (globalThis as typeof globalThis & { ResizeObserver: typeof ResizeObserverMock }).ResizeObserver = ResizeObserverMock;
+}
 
 function CanvasHarness() {
   const { placements, addPlacement } = useLayout();

@@ -1,5 +1,4 @@
 import './index.css';
-import React from "react";
 import { render } from "react-dom";
 import { injectSpeedInsights } from "@vercel/speed-insights";
 import { App } from "./App";

@@ -1,5 +1,4 @@
 /* @vitest-environment jsdom */
-import React from 'react';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { LayoutProvider, useLayout } from '../src/context/LayoutContext';
@@ -15,6 +14,7 @@ function SummaryHarness({
     <button
       onClick={() =>
         importState({
+          layoutTitle: 'Test Layout',
           drawerWidth: 24,
           drawerLength: 18,
           placements
