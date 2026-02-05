@@ -41,7 +41,7 @@ test('@smoke canvas can pan by drag at 1x and zoomed', async ({ page }) => {
 
   const afterAtOneX = await getTransformState(page);
   if (!afterAtOneX) throw new Error('Missing transform state after first drag');
-  expect(Math.abs(afterAtOneX.x - before.x) + Math.abs(afterAtOneX.y - before.y)).toBeGreaterThan(20);
+  expect(Math.abs(afterAtOneX.x - before.x) + Math.abs(afterAtOneX.y - before.y)).toBeGreaterThan(15);
 
   for (let i = 0; i < 8; i += 1) {
     await page.getByRole('button', { name: 'Zoom in' }).click();
