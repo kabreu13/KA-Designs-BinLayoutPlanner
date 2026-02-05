@@ -5,7 +5,7 @@ import { ensureCatalogExpanded, expectStoredPlacementsCount, getStoredPlacements
 const FIRST_BIN = '[data-testid="bin-card"]';
 const PLACED = '[data-testid="placed-bin"]';
 
-test('adding a bin shows it on the canvas', async ({ page }) => {
+test('@smoke adding a bin shows it on the canvas', async ({ page }) => {
   await page.goto('/');
   await ensureCatalogExpanded(page);
 

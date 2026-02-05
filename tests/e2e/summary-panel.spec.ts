@@ -15,7 +15,7 @@ test('drawer size inputs update canvas labels', async ({ page }) => {
   await expect(page.getByText('20" Length')).toBeVisible();
 });
 
-test('space used bar increases with placements', async ({ page }) => {
+test('@smoke space used bar increases with placements', async ({ page }) => {
   await page.goto('/');
   await ensureCatalogExpanded(page);
 

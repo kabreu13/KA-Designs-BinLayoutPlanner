@@ -21,7 +21,7 @@ test('header keeps only branding and title input', async ({ page }) => {
   await expect(header.locator('input[aria-label="Layout title"]:visible')).toHaveCount(1);
 });
 
-test('canvas can pan by drag at 1x and zoomed', async ({ page }) => {
+test('@smoke canvas can pan by drag at 1x and zoomed', async ({ page }) => {
   await page.goto('/');
 
   const container = page.getByTestId('canvas-scroll-container');
@@ -46,7 +46,12 @@ test('canvas can pan by drag at 1x and zoomed', async ({ page }) => {
   for (let i = 0; i < 8; i += 1) {
     await page.getByRole('button', { name: 'Zoom in' }).click();
   }
-  await page.waitForTimeout(220);
+  await expect
+    .poll(async () => {
+      const state = await getTransformState(page);
+      return state?.scale ?? 1;
+    })
+    .toBeGreaterThan(before.scale);
 
   const beforeZoomedDrag = await getTransformState(page);
   if (!beforeZoomedDrag) throw new Error('Missing transform state before zoomed drag');
@@ -54,14 +59,16 @@ test('canvas can pan by drag at 1x and zoomed', async ({ page }) => {
   await page.mouse.down();
   await page.mouse.move(dragFromX - 150, dragFromY + 70);
   await page.mouse.up();
-  await page.waitForTimeout(120);
-
-  const afterZoomedDrag = await getTransformState(page);
-  if (!afterZoomedDrag) throw new Error('Missing transform state after zoomed drag');
-  expect(
-    Math.abs(afterZoomedDrag.x - beforeZoomedDrag.x) +
-      Math.abs(afterZoomedDrag.y - beforeZoomedDrag.y)
-  ).toBeGreaterThan(2);
+  await expect
+    .poll(async () => {
+      const afterZoomedDrag = await getTransformState(page);
+      if (!afterZoomedDrag) return 0;
+      return (
+        Math.abs(afterZoomedDrag.x - beforeZoomedDrag.x) +
+        Math.abs(afterZoomedDrag.y - beforeZoomedDrag.y)
+      );
+    })
+    .toBeGreaterThan(2);
 });
 
 test('home canvas recenters view', async ({ page }) => {

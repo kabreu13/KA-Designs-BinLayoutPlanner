@@ -19,7 +19,7 @@ const triggerHistoryShortcut = async (page: import('@playwright/test').Page, act
   }, action);
 };
 
-test('undo and redo update placements', async ({ page }) => {
+test('@smoke undo and redo update placements', async ({ page }) => {
   await page.goto('/');
   await ensureCatalogExpanded(page);
 

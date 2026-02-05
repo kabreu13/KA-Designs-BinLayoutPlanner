@@ -90,12 +90,13 @@ test('quick actions bar can be dragged on desktop', async ({ page }) => {
     return true;
   });
   expect(dragged).toBe(true);
-  await page.waitForTimeout(120);
-
-  const afterX = Number.parseFloat((await bar.getAttribute('data-actions-offset-x')) ?? '0');
-  const afterY = Number.parseFloat((await bar.getAttribute('data-actions-offset-y')) ?? '0');
-
-  expect(Math.abs(afterX - beforeX) + Math.abs(afterY - beforeY)).toBeGreaterThan(30);
+  await expect
+    .poll(async () => {
+      const afterX = Number.parseFloat((await bar.getAttribute('data-actions-offset-x')) ?? '0');
+      const afterY = Number.parseFloat((await bar.getAttribute('data-actions-offset-y')) ?? '0');
+      return Math.abs(afterX - beforeX) + Math.abs(afterY - beforeY);
+    })
+    .toBeGreaterThan(30);
 });
 
 test('quick actions can collapse and expand on mobile', async ({ page }) => {

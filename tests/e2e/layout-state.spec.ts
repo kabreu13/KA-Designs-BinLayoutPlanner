@@ -10,7 +10,7 @@ const openFirstCatalogGroup = async (page: Page) => {
   await page.locator('[data-testid^="catalog-group-toggle-"]').first().click();
 };
 
-test('loads state from localStorage on refresh', async ({ page }) => {
+test('@smoke loads state from localStorage on refresh', async ({ page }) => {
   await page.goto('/');
   await openFirstCatalogGroup(page);
   await page.locator(BIN_CARD).first().click();

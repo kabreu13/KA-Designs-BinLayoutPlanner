@@ -1,7 +1,7 @@
 import './coverage';
 import { test, expect } from '@playwright/test';
 
-test('grid toggle shows/hides overlay', async ({ page }) => {
+test('@smoke grid toggle shows/hides overlay', async ({ page }) => {
   await page.goto('/');
 
   const grid = page.getByTestId('grid-overlay');
