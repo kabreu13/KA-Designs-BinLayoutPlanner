@@ -15,7 +15,7 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
     drawerWidth,
     drawerLength,
     setDrawerSize,
-    removePlacement,
+    removePlacements,
     openPlacementEditor,
     spaceUsedPercent
   } = useLayout();
@@ -23,6 +23,10 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
   const drawerArea = drawerWidth * drawerLength;
   const [status, setStatus] = useState<{ kind: 'info' | 'error'; text: string } | null>(null);
   const [isDrawerSettingsOpen, setIsDrawerSettingsOpen] = useState(true);
+  const [drawerInputError, setDrawerInputError] = useState<{ width?: string; length?: string }>({});
+
+  const MIN_DRAWER_DIMENSION = 0.25;
+  const MAX_DRAWER_DIMENSION = 200;
   useEffect(() => {
     if (!status) return;
     const id = window.setTimeout(() => setStatus(null), 2500);
@@ -126,6 +130,45 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
     return invalid.size;
   }, [uniquePlacements, bins, drawerWidth, drawerLength]);
 
+  const wouldInvalidateDrawerSize = (nextWidth: number, nextLength: number) => {
+    return placements.some((placement) => {
+      const bin = bins.find((b) => b.id === placement.binId);
+      const width = placement.width ?? bin?.width;
+      const length = placement.length ?? bin?.length;
+      if (width == null || length == null) return false;
+      return placement.x + width > nextWidth || placement.y + length > nextLength;
+    });
+  };
+
+  const applyDrawerSize = (nextWidth: number, nextLength: number) => {
+    if (placements.length > 0 && wouldInvalidateDrawerSize(nextWidth, nextLength)) {
+      setStatus({ kind: 'error', text: 'Resize would clip bins. Move or remove bins first.' });
+      return;
+    }
+    setDrawerSize(nextWidth, nextLength);
+  };
+
+  const validateDrawerInput = (raw: string, axis: 'width' | 'length') => {
+    if (raw.trim() === '') {
+      setDrawerInputError((prev) => ({ ...prev, [axis]: 'Enter a value.' }));
+      return null;
+    }
+    const value = Number(raw);
+    if (!Number.isFinite(value)) {
+      setDrawerInputError((prev) => ({ ...prev, [axis]: 'Enter a number.' }));
+      return null;
+    }
+    if (value < MIN_DRAWER_DIMENSION || value > MAX_DRAWER_DIMENSION) {
+      setDrawerInputError((prev) => ({
+        ...prev,
+        [axis]: `Must be between ${MIN_DRAWER_DIMENSION} and ${MAX_DRAWER_DIMENSION} in.`
+      }));
+      return null;
+    }
+    setDrawerInputError((prev) => ({ ...prev, [axis]: undefined }));
+    return value;
+  };
+
   const etsyCartItems = useMemo(
     () =>
       placementGroups.map((group) => ({
@@ -171,6 +214,12 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
     }
   };
 
+  const openCatalogTab = () => {
+    if (!mobile || typeof document === 'undefined') return;
+    const tab = document.querySelector('[data-testid="mobile-tab-catalog"]') as HTMLButtonElement | null;
+    tab?.click();
+  };
+
   return (
     <div
       className={`bg-white flex flex-col h-full ${
@@ -206,31 +255,53 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
                 <label className="text-xs text-slate-400 mb-1 block">Length (in)</label>
                 <input
                   type="number"
-                  min={6}
+                  min={MIN_DRAWER_DIMENSION}
                   step={0.25}
                   aria-label="Drawer length"
                   data-testid="drawer-length-input"
                   value={drawerLength}
-                  onChange={(e) => setDrawerSize(drawerWidth, Number(e.target.value) || drawerLength)}
+                  aria-invalid={Boolean(drawerInputError.length)}
+                  aria-describedby={drawerInputError.length ? 'drawer-length-error' : undefined}
+                  onChange={(e) => {
+                    const nextValue = validateDrawerInput(e.target.value, 'length');
+                    if (nextValue == null) return;
+                    applyDrawerSize(drawerWidth, nextValue);
+                  }}
                   className={`w-full bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-[#0B0B0C] focus:outline-none focus:ring-2 focus:ring-[#14476B]/20 ${
                     mobile ? 'p-3 min-h-11' : 'p-2'
                   }`}
                 />
+                {drawerInputError.length && (
+                  <p id="drawer-length-error" className="text-[11px] text-red-600 mt-1">
+                    {drawerInputError.length}
+                  </p>
+                )}
               </div>
               <div>
                 <label className="text-xs text-slate-400 mb-1 block">Width (in)</label>
                 <input
                   type="number"
-                  min={6}
+                  min={MIN_DRAWER_DIMENSION}
                   step={0.25}
                   aria-label="Drawer width"
                   data-testid="drawer-width-input"
                   value={drawerWidth}
-                  onChange={(e) => setDrawerSize(Number(e.target.value) || drawerWidth, drawerLength)}
+                  aria-invalid={Boolean(drawerInputError.width)}
+                  aria-describedby={drawerInputError.width ? 'drawer-width-error' : undefined}
+                  onChange={(e) => {
+                    const nextValue = validateDrawerInput(e.target.value, 'width');
+                    if (nextValue == null) return;
+                    applyDrawerSize(nextValue, drawerLength);
+                  }}
                   className={`w-full bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-[#0B0B0C] focus:outline-none focus:ring-2 focus:ring-[#14476B]/20 ${
                     mobile ? 'p-3 min-h-11' : 'p-2'
                   }`}
                 />
+                {drawerInputError.width && (
+                  <p id="drawer-width-error" className="text-[11px] text-red-600 mt-1">
+                    {drawerInputError.width}
+                  </p>
+                )}
               </div>
             </div>
 
@@ -267,22 +338,42 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
         </h3>
         <div className="space-y-3">
           {placementGroups.length === 0 && (
-            <p className="text-sm text-slate-400">No bins placed yet.</p>
+            <div className="text-sm text-slate-400 space-y-2">
+              <p>No bins placed yet.</p>
+              {mobile && (
+                <button
+                  type="button"
+                  onClick={openCatalogTab}
+                  className="text-xs font-semibold uppercase tracking-wide text-[#14476B] hover:text-[#1a5a8a]"
+                >
+                  Open Catalog
+                </button>
+              )}
+            </div>
           )}
           {placementGroups.map((group) => {
             return (
               <div
                 key={`${group.label}-${group.width}-${group.length}-${group.color}`}
-                data-testid="placed-item-group"
-                className="flex items-center justify-between group py-2 border-b border-slate-50 last:border-0 cursor-pointer"
-                onClick={(event: ReactMouseEvent<HTMLDivElement>) =>
-                  openPlacementEditor(
-                    group.placements.map((placement) => placement.id),
-                    event.clientX,
-                    event.clientY
-                  )}
+                className="flex items-center justify-between group py-2 border-b border-slate-50 last:border-0"
               >
-                <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  data-testid="placed-item-group"
+                  aria-label={`Edit ${group.label} group`}
+                  className="flex items-center gap-3 flex-1 text-left cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14476B]/30 rounded-md"
+                  onClick={(event: ReactMouseEvent<HTMLButtonElement>) => {
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    const keyboardActivated = event.detail === 0;
+                    const x = keyboardActivated ? rect.right : event.clientX;
+                    const y = keyboardActivated ? rect.top + rect.height / 2 : event.clientY;
+                    openPlacementEditor(
+                      group.placements.map((placement) => placement.id),
+                      x,
+                      y
+                    );
+                  }}
+                >
                   <div className="h-14 w-14 flex items-center justify-center">
                     <BinSizePreview
                       dataTestId="placed-item-preview"
@@ -300,13 +391,18 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
                       Color: {getColorLabel(group.color)} · Amount: {group.placements.length}
                     </p>
                   </div>
-                </div>
+                </button>
                 <button
-                  aria-label="Delete bin"
+                  type="button"
+                  aria-label={`Delete ${group.placements.length} bin${group.placements.length === 1 ? '' : 's'}`}
                   className={`text-slate-300 hover:text-red-500 transition-colors ${mobile ? 'min-h-11 min-w-11' : ''}`}
                   onClick={(event) => {
                     event.stopPropagation();
-                    removePlacement(group.placements[0].id);
+                    removePlacements(group.placements.map((placement) => placement.id));
+                    setStatus({
+                      kind: 'info',
+                      text: `Removed ${group.placements.length} bin${group.placements.length === 1 ? '' : 's'}`
+                    });
                   }}
                 >
                   <Trash2 className="h-4 w-4" />
@@ -437,6 +533,8 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
 
         {status && (
           <div
+            role={status.kind === 'error' ? 'alert' : 'status'}
+            aria-live={status.kind === 'error' ? 'assertive' : 'polite'}
             className={`text-xs text-center px-3 py-2 rounded-md ${
               status.kind === 'error'
                 ? 'bg-red-100 text-red-700 border border-red-200'

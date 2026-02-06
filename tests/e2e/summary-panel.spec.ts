@@ -95,7 +95,7 @@ test('remove bin from summary updates placements', async ({ page }) => {
   const removeButton = page
     .locator('[data-testid="placed-item-group"]')
     .first()
-    .getByRole('button', { name: 'Delete bin' });
+    .getByRole('button', { name: /Delete\s+\d+\s+bins?/i });
   await removeButton.click({ force: true });
 
   await expectStoredPlacementsCount(page, 1);
@@ -111,4 +111,23 @@ test('export PDF downloads a file', async ({ page }) => {
   const download = await downloadPromise;
   const filename = download.suggestedFilename();
   expect(filename).toBe('bin-layout.pdf');
+});
+
+test('drawer resize warns when bins would be clipped', async ({ page }) => {
+  const state = {
+    drawerWidth: 24,
+    drawerLength: 18,
+    placements: [{ id: 'p1', binId: 'bin-2x2', x: 22, y: 0 }],
+    usage: { 'bin-2x2': 1 }
+  };
+  await page.addInitScript((layout) => {
+    localStorage.setItem('bin-layout-state', JSON.stringify(layout));
+  }, state);
+
+  await page.goto('/');
+  const widthInput = page.getByTestId('drawer-width-input');
+  await widthInput.fill('20');
+
+  await expect(page.getByText('Resize would clip bins. Move or remove bins first.')).toBeVisible();
+  await expect(widthInput).toHaveValue('24');
 });

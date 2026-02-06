@@ -1,21 +1,24 @@
 import './coverage';
 import { test, expect } from '@playwright/test';
+import { dismissHowTo } from './helpers';
 
 test('@smoke grid toggle shows/hides overlay', async ({ page }) => {
   await page.goto('/');
+  await dismissHowTo(page);
 
   const grid = page.getByTestId('grid-overlay');
   await expect(grid).toBeVisible();
 
-  await page.getByTitle('Toggle grid').click();
+  await page.getByTitle('Toggle grid (G)').click();
   await expect(grid).toHaveCount(0);
 
-  await page.getByTitle('Toggle grid').click();
+  await page.getByTitle('Toggle grid (G)').click();
   await expect(grid).toBeVisible();
 });
 
 test('snap input updates value', async ({ page }) => {
   await page.goto('/');
+  await dismissHowTo(page);
 
   const snapInput = page.getByLabel('Snap to grid');
   await expect(snapInput).toHaveValue('1');

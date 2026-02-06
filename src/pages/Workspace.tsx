@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { DndContext, PointerSensor, TouchSensor, MouseSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core';
+import { DndContext, PointerSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core';
 import { ChevronDown, ChevronLeft, ChevronRight, Package2, PanelRight } from 'lucide-react';
 import { BinCatalog } from '../components/BinCatalog';
 import { Canvas } from '../components/Canvas';
@@ -25,10 +25,11 @@ export function Workspace() {
   );
   const [mobileTab, setMobileTab] = useState<MobileTab>('catalog');
   const [isMobilePanelOpen, setIsMobilePanelOpen] = useState(false);
+  const [layoutResizeKey, setLayoutResizeKey] = useState(0);
+  const [mobileBottomInsetPx, setMobileBottomInsetPx] = useState(100);
+  const mobilePanelRef = useRef<HTMLDivElement | null>(null);
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
-    useSensor(MouseSensor, { activationConstraint: { distance: 0 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 120, tolerance: 6 } })
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } })
   );
   const activeBin = activeBinId ? bins.find((bin) => bin.id === activeBinId) ?? null : null;
 
@@ -46,6 +47,38 @@ export function Workspace() {
     media.addEventListener('change', syncLayout);
     return () => media.removeEventListener('change', syncLayout);
   }, []);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setLayoutResizeKey((key) => key + 1);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
+    setLayoutResizeKey((key) => key + 1);
+  }, [isCatalogOpen, isSummaryOpen, isMobilePanelOpen, isMobileLayout]);
+
+  const updateMobileInset = useCallback(() => {
+    const rect = mobilePanelRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setMobileBottomInsetPx(Math.ceil(rect.height) + 12);
+  }, []);
+
+  useEffect(() => {
+    if (!isMobileLayout) return;
+    updateMobileInset();
+  }, [isMobileLayout, isMobilePanelOpen, mobileTab, layoutResizeKey, updateMobileInset]);
+
+  useEffect(() => {
+    if (!isMobileLayout) return;
+    const node = mobilePanelRef.current;
+    if (!node || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => updateMobileInset());
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [isMobileLayout, updateMobileInset]);
 
   const openMobilePanel = (tab: MobileTab) => {
     if (mobileTab === tab) {
@@ -70,20 +103,29 @@ export function Workspace() {
       onDragEnd={() => setActiveBinId(null)}
       onDragCancel={() => setActiveBinId(null)}
     >
-      <div className="h-[calc(100vh-64px)]">
+      <div className="h-[calc(100vh-65px)] supports-[height:100dvh]:h-[calc(100dvh-65px)]">
         {isMobileLayout ? (
           <div className="relative h-full min-h-0 overflow-hidden bg-[#F6F7F8]">
             <Canvas
               isMobileLayout
-              mobileBottomInsetPx={isMobilePanelOpen ? 420 : 100}
+              mobileBottomInsetPx={mobileBottomInsetPx}
+              layoutResizeKey={layoutResizeKey}
             />
-            <div className="absolute inset-x-0 bottom-0 z-40 px-2 pb-2">
+            <div
+              ref={mobilePanelRef}
+              className="absolute inset-x-0 bottom-0 z-40 px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]"
+            >
               <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white/95 backdrop-blur shadow-lg">
-                <div className="grid grid-cols-[1fr_1fr_auto] items-center gap-1 p-1.5">
+                <div role="tablist" aria-label="Mobile panels" className="grid grid-cols-[1fr_1fr_auto] items-center gap-1 p-1.5">
                   <button
                     type="button"
                     data-testid="mobile-tab-catalog"
+                    id="mobile-tab-catalog"
                     onClick={() => openMobilePanel('catalog')}
+                    role="tab"
+                    aria-selected={mobileTab === 'catalog'}
+                    aria-controls="mobile-panel-content"
+                    tabIndex={mobileTab === 'catalog' ? 0 : -1}
                     className={`min-h-11 rounded-xl px-3 text-sm font-medium transition-colors ${
                       mobileTab === 'catalog' && isMobilePanelOpen
                         ? 'bg-[#14476B]/10 text-[#14476B]'
@@ -98,7 +140,12 @@ export function Workspace() {
                   <button
                     type="button"
                     data-testid="mobile-tab-summary"
+                    id="mobile-tab-summary"
                     onClick={() => openMobilePanel('summary')}
+                    role="tab"
+                    aria-selected={mobileTab === 'summary'}
+                    aria-controls="mobile-panel-content"
+                    tabIndex={mobileTab === 'summary' ? 0 : -1}
                     className={`min-h-11 rounded-xl px-3 text-sm font-medium transition-colors ${
                       mobileTab === 'summary' && isMobilePanelOpen
                         ? 'bg-[#14476B]/10 text-[#14476B]'
@@ -114,6 +161,7 @@ export function Workspace() {
                     type="button"
                     data-testid="mobile-panel-toggle"
                     aria-expanded={isMobilePanelOpen}
+                    aria-controls="mobile-panel-content"
                     onClick={() => setIsMobilePanelOpen((open) => !open)}
                     className="h-11 w-11 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-100 flex items-center justify-center"
                   >
@@ -125,7 +173,14 @@ export function Workspace() {
                     isMobilePanelOpen ? 'max-h-[52vh]' : 'max-h-0'
                   }`}
                 >
-                  <div className="h-[52vh] border-t border-slate-200">
+                  <div
+                    id="mobile-panel-content"
+                    role="tabpanel"
+                    aria-labelledby={mobileTab === 'catalog' ? 'mobile-tab-catalog' : 'mobile-tab-summary'}
+                    aria-hidden={!isMobilePanelOpen}
+                    tabIndex={isMobilePanelOpen ? 0 : -1}
+                    className="h-[52vh] border-t border-slate-200"
+                  >
                     {mobileTab === 'catalog' ? <BinCatalog mobile /> : <SummaryPanel mobile />}
                   </div>
                 </div>
@@ -142,7 +197,7 @@ export function Workspace() {
             >
               <BinCatalog />
             </SidePanel>
-            <Canvas />
+            <Canvas layoutResizeKey={layoutResizeKey} />
             <SidePanel
               side="right"
               isOpen={isSummaryOpen}

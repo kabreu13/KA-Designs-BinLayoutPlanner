@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { Card } from './ui/Card';
 import { ChevronDown, ChevronRight } from 'lucide-react';
@@ -9,8 +9,15 @@ export function BinCatalog({ mobile = false }: { mobile?: boolean }) {
   const { bins, addPlacement } = useLayout();
   const availableBuckets = Array.from(new Set(bins.map((bin) => bin.length))).sort((a, b) => a - b);
   const [collapsedBuckets, setCollapsedBuckets] = useState<Record<number, boolean>>(() =>
-    Object.fromEntries(availableBuckets.map((bucket) => [bucket, true]))
+    Object.fromEntries(availableBuckets.map((bucket, index) => [bucket, index !== 0]))
   );
+  const [status, setStatus] = useState<{ kind: 'info' | 'error'; text: string } | null>(null);
+
+  useEffect(() => {
+    if (!status) return;
+    const id = window.setTimeout(() => setStatus(null), 2500);
+    return () => window.clearTimeout(id);
+  }, [status]);
 
   const grouped = bins.reduce<Record<number, typeof bins>>((acc, bin) => {
     if (!acc[bin.length]) {
@@ -32,6 +39,19 @@ export function BinCatalog({ mobile = false }: { mobile?: boolean }) {
       <div className={`border-b border-slate-900/[0.06] ${mobile ? 'p-3' : 'p-4'}`}>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Bin Catalog</h2>
         <p className="text-xs text-slate-500">Click or drag to place</p>
+        {status && (
+          <div
+            role="status"
+            aria-live="polite"
+            className={`mt-2 text-xs px-2 py-1 rounded-md border ${
+              status.kind === 'error'
+                ? 'bg-red-100 text-red-700 border-red-200'
+                : 'bg-emerald-100 text-emerald-700 border-emerald-200'
+            }`}
+          >
+            {status.text}
+          </div>
+        )}
       </div>
 
       {/* Catalog List */}
@@ -47,6 +67,7 @@ export function BinCatalog({ mobile = false }: { mobile?: boolean }) {
                     type="button"
                     data-testid={`catalog-group-toggle-${bucket}`}
                     aria-expanded={!isBucketCollapsed(bucket)}
+                    aria-controls={`catalog-group-body-${bucket}`}
                     onClick={() => toggleBucket(bucket)}
                     className={`w-full flex items-center gap-1 text-xs font-semibold text-slate-400 uppercase tracking-wider pl-1 text-left hover:text-slate-600 transition-colors ${
                       mobile ? 'min-h-11' : ''
@@ -57,9 +78,27 @@ export function BinCatalog({ mobile = false }: { mobile?: boolean }) {
                   </button>
                 </div>
                 {!isBucketCollapsed(bucket) && (
-                  <div data-testid={`catalog-group-body-${bucket}`} className={`grid gap-3 ${mobile ? 'grid-cols-2' : 'grid-cols-1 md:grid-cols-2'}`}>
+                  <div
+                    id={`catalog-group-body-${bucket}`}
+                    data-testid={`catalog-group-body-${bucket}`}
+                    className={`grid gap-3 ${mobile ? 'grid-cols-2' : 'grid-cols-1 md:grid-cols-2'}`}
+                  >
                     {grouped[bucket].map((bin) => (
-                      <DraggableBinCard key={bin.id} bin={bin} onClick={() => addPlacement(bin.id)} mobile={mobile} />
+                      <DraggableBinCard
+                        key={bin.id}
+                        bin={bin}
+                        onClick={() => {
+                          const result = addPlacement(bin.id);
+                          if (result.status === 'blocked') {
+                            setStatus({ kind: 'error', text: 'No room for that bin.' });
+                            return;
+                          }
+                          if (result.status === 'autofit') {
+                            setStatus({ kind: 'info', text: 'Placed in nearest available spot.' });
+                          }
+                        }}
+                        mobile={mobile}
+                      />
                     ))}
                   </div>
                 )}
@@ -88,6 +127,9 @@ function DraggableBinCard({
   return (
     <Card
       data-testid="bin-card"
+      aria-label={`Add ${bin.name}`}
+      role="button"
+      tabIndex={0}
       className={`group cursor-grab active:cursor-grabbing border-slate-200 hover:border-[#14476B]/30 w-full ${
         mobile ? 'min-h-24' : ''
       }`}
@@ -96,6 +138,11 @@ function DraggableBinCard({
       ref={setNodeRef}
       style={{ opacity: 1 }}
       onClick={onClick}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        onClick();
+      }}
       {...listeners}
       {...attributes}
     >

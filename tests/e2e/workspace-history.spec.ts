@@ -60,3 +60,20 @@ test('keyboard shortcuts undo and redo', async ({ page }) => {
   await triggerHistoryShortcut(page, 'redo');
   await expect(page.locator(PLACED)).toHaveCount(2);
 });
+
+test('keyboard shortcuts ignore layout title input', async ({ page }) => {
+  await page.goto('/');
+  await ensureCatalogExpanded(page);
+
+  const binCard = page.locator(BIN_CARD).first();
+  await binCard.waitFor({ state: 'visible' });
+  await binCard.click();
+  await expect(page.locator(PLACED)).toHaveCount(1);
+
+  const titleInput = page.getByLabel('Layout title');
+  await titleInput.click();
+  await page.keyboard.type('Test Layout');
+  await page.keyboard.press('Control+Z');
+
+  await expect(page.locator(PLACED)).toHaveCount(1);
+});

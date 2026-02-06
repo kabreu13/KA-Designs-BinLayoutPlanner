@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type {
   HTMLAttributes,
   MouseEvent as ReactMouseEvent,
@@ -27,9 +27,13 @@ const FRAME_THROTTLE_MS = 16; // ~60fps
 const SIZE_STEP = 2;
 const MIN_BIN_SIZE = 2;
 const MAX_BIN_SIZE = 8;
+const DEFAULT_SNAP = 1;
+const SNAP_MIN = 0.5;
+const SNAP_MAX = 2;
 const CANVAS_PADDING = 32; // px padding between canvas edge and drawer area
 const LABEL_ZONE = CANVAS_PADDING / 2; // center labels within the padding zone
 const EDITOR_WIDTH_PX = 240;
+const EDITOR_HEIGHT_PX = 320;
 const EDITOR_OFFSET_PX = 12;
 const VIEWPORT_PADDING_PX = 8;
 const MIN_CANVAS_ZOOM = 0.5;
@@ -40,10 +44,12 @@ const ZOOM_FIT_ANIMATION_MS = 180;
 const WHEEL_ZOOM_SENSITIVITY = 0.00125;
 const DESKTOP_CANVAS_STAGE_GUTTER_PX = 72;
 const MOBILE_CANVAS_STAGE_GUTTER_PX = 48;
+const ACTIONS_DRAG_MARGIN_PX = 12;
+const HOW_TO_STORAGE_KEY = 'bin-layout-howto-hidden';
 const TRANSFORM_WRAPPER_TEST_PROPS = { 'data-testid': 'canvas-transform-wrapper' } as HTMLAttributes<HTMLDivElement>;
 const TRANSFORM_CONTENT_TEST_PROPS = { 'data-testid': 'canvas-transform-content' } as HTMLAttributes<HTMLDivElement>;
 
-const TOUR_STEPS = [
+const DESKTOP_TOUR_STEPS = [
   {
     selector: '[data-testid="side-panel-left"]',
     title: '1. Pick A Bin',
@@ -71,16 +77,41 @@ const TOUR_STEPS = [
   }
 ] as const;
 
+const MOBILE_TOUR_STEPS = [
+  {
+    selector: '[data-testid="mobile-tab-catalog"]',
+    title: '1. Open The Catalog',
+    description: 'Tap the Catalog tab to browse bin sizes.'
+  },
+  {
+    selector: '[data-tour="canvas-drop-zone"]',
+    title: '2. Drop On Canvas',
+    description: 'Drop bins inside the drawer area. Bins snap to the grid and stay within bounds.'
+  },
+  {
+    selector: '[data-tour="quick-actions-pill"]',
+    title: '3. Use Quick Actions',
+    description: 'Undo/redo, grid, suggest layout, clear, and paint are always within reach.'
+  },
+  {
+    selector: '[data-testid="mobile-tab-summary"]',
+    title: '4. Review Summary',
+    description: 'Use the Summary tab for drawer settings, item groups, exports, and quick edits.'
+  }
+] as const;
+
 type CanvasProps = {
   isMobileLayout?: boolean;
   hideQuickActions?: boolean;
   mobileBottomInsetPx?: number;
+  layoutResizeKey?: number;
 };
 
 export function Canvas({
   isMobileLayout = false,
   hideQuickActions = false,
-  mobileBottomInsetPx = 0
+  mobileBottomInsetPx = 0,
+  layoutResizeKey = 0
 }: CanvasProps = {}) {
   const {
     placements,
@@ -91,7 +122,7 @@ export function Canvas({
     movePlacement,
     updatePlacement,
     updatePlacements,
-    removePlacement,
+    removePlacements,
     clearPlacements,
     activePlacementEditor,
     closePlacementEditor,
@@ -109,9 +140,19 @@ export function Canvas({
   };
 
   const [showGrid, setShowGrid] = useState(true);
-  const [snap, setSnap] = useState(1);
+  const [snap, setSnap] = useState(DEFAULT_SNAP);
+  const [snapDraft, setSnapDraft] = useState(String(DEFAULT_SNAP));
+  const [snapHelper, setSnapHelper] = useState<string | null>(null);
   const [suggestMode, setSuggestMode] = useState<'pack' | 'random'>('pack');
   const [toast, setToast] = useState<{ type: 'info' | 'error'; message: string } | null>(null);
+  const [binGhost, setBinGhost] = useState<{
+    x: number;
+    y: number;
+    width: number;
+    length: number;
+    fits: boolean;
+    outOfBounds: boolean;
+  } | null>(null);
   const [dragStatus, setDragStatus] = useState<{ placementId: string; fits: boolean } | null>(null);
   const [editor, setEditor] = useState<{ placementIds: string[]; x: number; y: number } | null>(null);
   const [labelDraft, setLabelDraft] = useState('');
@@ -122,12 +163,23 @@ export function Canvas({
   const [paintColorSelection, setPaintColorSelection] = useState<string>(DEFAULT_BIN_COLOR);
   const [canvasZoom, setCanvasZoom] = useState(1);
   const [canvasPosition, setCanvasPosition] = useState<Point>({ x: 0, y: 0 });
+  const [highlight, setHighlight] = useState<{ id: string; type: 'info' | 'error' } | null>(null);
   const [quickActionsOpen, setQuickActionsOpen] = useState(() => !isMobileLayout);
+  const [quickActionsMode, setQuickActionsMode] = useState<'mini' | 'full'>(() =>
+    isMobileLayout ? 'mini' : 'full'
+  );
   const [isPanningCanvas, setIsPanningCanvas] = useState(false);
+  const [zoomLockActive, setZoomLockActive] = useState(false);
   const [actionsOffset, setActionsOffset] = useState<Point>({ x: 0, y: 0 });
   const [isDraggingActions, setIsDraggingActions] = useState(false);
-  const [showHowTo, setShowHowTo] = useState(true);
+  const [showHowTo, setShowHowTo] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    return localStorage.getItem(HOW_TO_STORAGE_KEY) !== 'true';
+  });
   const [tourActive, setTourActive] = useState(false);
+  const disableQuickActions = showHowTo && !tourActive;
+  const hasPlacements = placements.length > 0;
+  const isQuickActionsMini = isMobileLayout && quickActionsMode === 'mini';
   const [tourStepIndex, setTourStepIndex] = useState(0);
   const [tourTargetRect, setTourTargetRect] = useState<DOMRect | null>(null);
   const canvasViewportRef = useRef<HTMLDivElement | null>(null);
@@ -142,11 +194,39 @@ export function Canvas({
   const canvasZoomRef = useRef(canvasZoom);
   const canvasPositionRef = useRef<Point>({ x: 0, y: 0 });
   const panStateRef = useRef<{ pointerId: number; x: number; y: number; originX: number; originY: number } | null>(null);
-  const actionsDragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
+  const actionsDragRef = useRef<{
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+    rect: DOMRect | null;
+  } | null>(null);
   const actionsHandleRef = useRef<HTMLButtonElement | null>(null);
+  const actionsDragElementRef = useRef<HTMLElement | null>(null);
+  const actionsClickBlockedRef = useRef(false);
+  const suppressClickUntilRef = useRef(0);
+  const lastFocusRef = useRef<HTMLElement | null>(null);
+  const labelInputRef = useRef<HTMLInputElement | null>(null);
+  const snapInputRef = useRef<HTMLInputElement | null>(null);
+  const highlightTimeoutRef = useRef<number | null>(null);
+  const previousLayoutModeRef = useRef(isMobileLayout);
   const wheelZoomRafRef = useRef<number | null>(null);
   const wheelZoomDeltaRef = useRef(0);
   const wheelZoomPointerRef = useRef<Point | undefined>(undefined);
+  const drawerZoomResetTimeoutRef = useRef<number | null>(null);
+  const drawerZoomResetLateTimeoutRef = useRef<number | null>(null);
+  const drawerZoomResetIntervalRef = useRef<number | null>(null);
+  const drawerZoomResetIntervalStopRef = useRef<number | null>(null);
+  const zoomLockTimeoutRef = useRef<number | null>(null);
+  const zoomHintShownRef = useRef(false);
+  const hasInitializedRef = useRef(false);
+  const drawerSizeRef = useRef<{ width: number; length: number; initialized: boolean }>({
+    width: drawerWidth,
+    length: drawerLength,
+    initialized: false
+  });
+  const autoFitSuppressedUntilRef = useRef<number>(0);
+  const forceZoomResetUntilRef = useRef<number>(0);
 
   useEffect(() => {
     if (!toast) return;
@@ -166,6 +246,21 @@ export function Canvas({
   }, [isMobileLayout]);
 
   useEffect(() => {
+    if (isMobileLayout) {
+      setQuickActionsMode('mini');
+    } else {
+      setQuickActionsMode('full');
+    }
+  }, [isMobileLayout]);
+
+  useEffect(() => {
+    if (!isMobileLayout) return;
+    if (!quickActionsOpen) {
+      setQuickActionsMode('mini');
+    }
+  }, [isMobileLayout, quickActionsOpen]);
+
+  useEffect(() => {
     setActionsOffset({ x: 0, y: 0 });
   }, [isMobileLayout]);
 
@@ -177,6 +272,11 @@ export function Canvas({
     canvasPositionRef.current = canvasPosition;
   }, [canvasPosition]);
 
+  useEffect(() => {
+    if (snapInputRef.current && document.activeElement === snapInputRef.current) return;
+    setSnapDraft(String(snap));
+  }, [snap]);
+
   const canvasStageGutterPx = isMobileLayout ? MOBILE_CANVAS_STAGE_GUTTER_PX : DESKTOP_CANVAS_STAGE_GUTTER_PX;
 
   const clampZoom = useCallback((value: number) => {
@@ -186,6 +286,7 @@ export function Canvas({
 
   const zoomCanvas = useCallback(
     (nextZoom: number, pointer?: Point, animationMs = ZOOM_BUTTON_ANIMATION_MS) => {
+      if (zoomLockActive) return;
       const viewport = canvasViewportRef.current;
       const transform = transformRef.current;
       const previousZoom = canvasZoomRef.current;
@@ -211,38 +312,66 @@ export function Canvas({
       const nextPositionY = anchorY - (anchorY - currentPosition.y) * zoomRatio;
       transform.setTransform(nextPositionX, nextPositionY, targetZoom, animationMs, 'easeOut');
     },
-    [clampZoom]
+    [clampZoom, zoomLockActive]
   );
 
-  const fitCanvasInView = useCallback(() => {
+  const getFitZoom = useCallback(() => {
     const viewport = canvasViewportRef.current;
-    const transform = transformRef.current;
-    if (!viewport || !transform) return;
+    if (!viewport) return null;
     const baseWidth = drawerWidth * GRID_SIZE + CANVAS_PADDING * 2 + canvasStageGutterPx * 2;
     const baseHeight = drawerLength * GRID_SIZE + CANVAS_PADDING * 2 + canvasStageGutterPx * 2;
-    if (baseWidth <= 0 || baseHeight <= 0) return;
+    if (baseWidth <= 0 || baseHeight <= 0) return null;
     const availableWidth = Math.max(120, viewport.clientWidth - 24);
     const availableHeight = Math.max(120, viewport.clientHeight - 24);
-    const fitZoom = clampZoom(Math.min(availableWidth / baseWidth, availableHeight / baseHeight));
-    transform.centerView(fitZoom, ZOOM_FIT_ANIMATION_MS, 'easeOut');
+    return clampZoom(Math.min(availableWidth / baseWidth, availableHeight / baseHeight));
   }, [canvasStageGutterPx, clampZoom, drawerLength, drawerWidth]);
 
-  useEffect(() => {
-    const id = window.requestAnimationFrame(() => {
-      fitCanvasInView();
-    });
-    return () => window.cancelAnimationFrame(id);
-  }, [fitCanvasInView, drawerWidth, drawerLength, isMobileLayout]);
+  const fitCanvasInView = useCallback(() => {
+    if (performance.now() < autoFitSuppressedUntilRef.current) return;
+    const transform = transformRef.current;
+    const fitZoom = getFitZoom();
+    if (!transform || fitZoom == null) return;
+    transform.centerView(fitZoom, ZOOM_FIT_ANIMATION_MS, 'easeOut');
+  }, [getFitZoom]);
 
   useEffect(() => {
     if (!activePlacementEditor) return;
+    if (typeof document !== 'undefined') {
+      lastFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    }
     setEditor(activePlacementEditor);
   }, [activePlacementEditor]);
 
   const closeEditor = useCallback(() => {
     setEditor(null);
     closePlacementEditor();
+    const lastFocus = lastFocusRef.current;
+    if (lastFocus && typeof document !== 'undefined' && document.contains(lastFocus)) {
+      window.requestAnimationFrame(() => lastFocus.focus());
+    }
   }, [closePlacementEditor]);
+
+  useEffect(() => {
+    if (!editor) return;
+    const id = window.requestAnimationFrame(() => {
+      labelInputRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [editor]);
+
+  const hideHowTo = () => {
+    setShowHowTo(false);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(HOW_TO_STORAGE_KEY, 'true');
+    }
+  };
+
+  const showHowToCard = () => {
+    setShowHowTo(true);
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(HOW_TO_STORAGE_KEY);
+    }
+  };
 
   useEffect(() => {
     if (!editor) return;
@@ -275,7 +404,7 @@ export function Canvas({
     };
   }, [closeEditor, editor]);
 
-  const handleSuggestLayout = () => {
+  const handleSuggestLayout = useCallback(() => {
     const mode = suggestMode;
     const result = suggestLayout(mode);
     if (result.status === 'blocked') {
@@ -293,7 +422,35 @@ export function Canvas({
       return;
     }
     setToast({ type: 'info', message: mode === 'pack' ? 'Bins packed together.' : 'Random layout applied.' });
-  };
+  }, [suggestLayout, suggestMode]);
+
+  const handleClearLayout = useCallback(() => {
+    if (placements.length === 0) return;
+    clearPlacements();
+    setToast({ type: 'info', message: 'Layout cleared. Use Undo to restore.' });
+  }, [clearPlacements, placements.length]);
+
+  const triggerHighlight = useCallback((placementId: string, type: 'info' | 'error' = 'info') => {
+    setHighlight({ id: placementId, type });
+    if (highlightTimeoutRef.current != null) {
+      window.clearTimeout(highlightTimeoutRef.current);
+    }
+    highlightTimeoutRef.current = window.setTimeout(() => {
+      setHighlight(null);
+      highlightTimeoutRef.current = null;
+    }, 1200);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (highlightTimeoutRef.current != null) {
+        window.clearTimeout(highlightTimeoutRef.current);
+        highlightTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
+  const suggestModeLabel = suggestMode === 'pack' ? 'Pack' : 'Random';
 
   const handleResize = (axis: 'width' | 'length', direction: -1 | 1) => {
     if (!selectedSize || selectedPlacementIds.length === 0) return;
@@ -301,7 +458,12 @@ export function Canvas({
     const next = Math.max(MIN_BIN_SIZE, Math.min(MAX_BIN_SIZE, current + direction * SIZE_STEP));
     if (next === current) return;
     const result = updatePlacements(selectedPlacementIds, { [axis]: next });
-    if (result.status === 'blocked') setToast({ type: 'error', message: 'Cannot resize — no space available.' });
+    if (result.status === 'blocked') {
+      setToast({ type: 'error', message: 'Cannot resize — would overlap or exceed drawer.' });
+      if (selectedPlacementIds[0]) {
+        triggerHighlight(selectedPlacementIds[0], 'error');
+      }
+    }
   };
 
   const commitLabel = (rawLabel?: string) => {
@@ -351,6 +513,7 @@ export function Canvas({
   const paintPlacement = (placementId: string) => {
     if (!paintMode) return;
     updatePlacement(placementId, { color: getActivePaintColor() });
+    triggerHighlight(placementId, 'info');
   };
 
   useEffect(() => {
@@ -368,6 +531,8 @@ export function Canvas({
     return () => window.removeEventListener('pointerdown', handlePointerDown, true);
   }, [paintMode]);
 
+  const tourSteps = isMobileLayout ? MOBILE_TOUR_STEPS : DESKTOP_TOUR_STEPS;
+
   const stopTour = useCallback(() => {
     setTourActive(false);
     setTourTargetRect(null);
@@ -375,23 +540,29 @@ export function Canvas({
 
   const startTour = () => {
     setShowHowTo(false);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(HOW_TO_STORAGE_KEY, 'true');
+    }
+    if (isMobileLayout) {
+      setQuickActionsOpen(true);
+    }
     setTourStepIndex(0);
     setTourActive(true);
   };
 
   const nextTourStep = () => {
-    if (tourStepIndex >= TOUR_STEPS.length - 1) {
+    if (tourStepIndex >= tourSteps.length - 1) {
       stopTour();
       return;
     }
-    setTourStepIndex((current) => Math.min(current + 1, TOUR_STEPS.length - 1));
+    setTourStepIndex((current) => Math.min(current + 1, tourSteps.length - 1));
   };
 
   const previousTourStep = () => {
     setTourStepIndex((current) => Math.max(0, current - 1));
   };
 
-  const activeTourStep = tourActive ? TOUR_STEPS[tourStepIndex] : null;
+  const activeTourStep = tourActive ? tourSteps[tourStepIndex] : null;
   const updateTourTarget = useCallback(
     (scrollIntoView: boolean) => {
       if (!activeTourStep) {
@@ -417,6 +588,21 @@ export function Canvas({
     const id = window.setTimeout(() => updateTourTarget(false), 220);
     return () => window.clearTimeout(id);
   }, [tourActive, tourStepIndex, updateTourTarget]);
+
+  useEffect(() => {
+    if (!tourActive) return;
+    if (tourStepIndex > tourSteps.length - 1) {
+      setTourStepIndex(0);
+    }
+  }, [tourActive, tourStepIndex, tourSteps.length]);
+
+  useEffect(() => {
+    const previous = previousLayoutModeRef.current;
+    previousLayoutModeRef.current = isMobileLayout;
+    if (tourActive && previous !== isMobileLayout) {
+      stopTour();
+    }
+  }, [isMobileLayout, stopTour, tourActive]);
 
   useEffect(() => {
     if (!tourActive) return;
@@ -477,7 +663,7 @@ export function Canvas({
 
   const { setNodeRef: setDropNodeRef } = useDroppable({ id: 'drop-area' });
 
-  const clampSnap = (value: number) => Math.max(0.5, Math.min(2, value));
+  const clampSnap = (value: number) => Math.max(SNAP_MIN, Math.min(SNAP_MAX, value));
   const snapValue = clampSnap(snap);
   const gridStepPx = gridSize * snapValue;
   const applySnap = (value: number) => Math.round(value / snapValue) * snapValue;
@@ -487,19 +673,198 @@ export function Canvas({
     return applySnap(value);
   };
 
+  const handleSnapInputChange = (value: string) => {
+    setSnapDraft(value);
+    setSnapHelper(null);
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return;
+    if (numeric < SNAP_MIN || numeric > SNAP_MAX) return;
+    setSnap(numeric);
+  };
+
+  const commitSnapInput = () => {
+    const numeric = Number(snapDraft);
+    const fallback = DEFAULT_SNAP;
+    if (!Number.isFinite(numeric)) {
+      setSnap(fallback);
+      setSnapDraft(String(fallback));
+      setSnapHelper(`Enter ${SNAP_MIN}\u2013${SNAP_MAX} in.`);
+      return;
+    }
+    const clamped = clampSnap(numeric);
+    setSnap(clamped);
+    setSnapDraft(String(clamped));
+    setSnapHelper(clamped !== numeric ? `Clamped to ${SNAP_MIN}\u2013${SNAP_MAX} in.` : null);
+  };
+
+  const setCanvasToScale = useCallback(
+    (scale: number, animationMs = 0) => {
+      const viewport = canvasViewportRef.current;
+      const transform = transformRef.current;
+      if (!viewport || !transform) return;
+      const rect = viewport.getBoundingClientRect();
+      const stageWidth = drawerWidth * GRID_SIZE + CANVAS_PADDING * 2 + canvasStageGutterPx * 2;
+      const stageHeight = drawerLength * GRID_SIZE + CANVAS_PADDING * 2 + canvasStageGutterPx * 2;
+      const targetWidth = stageWidth * scale;
+      const targetHeight = stageHeight * scale;
+      const nextX = (rect.width - targetWidth) / 2;
+      const nextY = (rect.height - targetHeight) / 2;
+      transform.setTransform(nextX, nextY, scale, animationMs, 'easeOut');
+    },
+    [canvasStageGutterPx, drawerLength, drawerWidth]
+  );
+
+  const handleCanvasInit = useCallback((ref: ReactZoomPanPinchRef) => {
+    transformRef.current = ref;
+    const { scale, positionX, positionY } = ref.state;
+    canvasZoomRef.current = scale;
+    canvasPositionRef.current = { x: positionX, y: positionY };
+    setCanvasZoom(scale);
+    setCanvasPosition({ x: positionX, y: positionY });
+    const shouldFit = !hasInitializedRef.current;
+    hasInitializedRef.current = true;
+    window.requestAnimationFrame(() => {
+      if (shouldFit) {
+        fitCanvasInView();
+      } else {
+        setCanvasToScale(1, 0);
+      }
+    });
+  }, [fitCanvasInView, setCanvasToScale]);
+
+  const handleCanvasTransformed = useCallback(
+    (_ref: ReactZoomPanPinchRef, state: { scale: number; positionX: number; positionY: number }) => {
+      if (performance.now() < forceZoomResetUntilRef.current && Math.abs(state.scale - 1) > 0.01) {
+        setCanvasToScale(1, 0);
+        canvasZoomRef.current = 1;
+        setCanvasZoom(1);
+        setCanvasPosition({ x: state.positionX, y: state.positionY });
+        return;
+      }
+      const nextScale = clampZoom(state.scale);
+      canvasZoomRef.current = nextScale;
+      canvasPositionRef.current = { x: state.positionX, y: state.positionY };
+      setCanvasZoom(nextScale);
+      setCanvasPosition({ x: state.positionX, y: state.positionY });
+    },
+    [clampZoom, setCanvasToScale]
+  );
+
+  useEffect(() => {
+    fitCanvasInView();
+  }, [fitCanvasInView, layoutResizeKey]);
+
+  useLayoutEffect(() => {
+    const previous = drawerSizeRef.current;
+    const drawerChanged = previous.width !== drawerWidth || previous.length !== drawerLength;
+    drawerSizeRef.current = { width: drawerWidth, length: drawerLength, initialized: true };
+
+    const id = window.requestAnimationFrame(() => {
+      if (!previous.initialized) {
+        fitCanvasInView();
+        return;
+      }
+
+      if (drawerChanged) {
+        const transform = transformRef.current;
+        if (!transform) {
+          canvasZoomRef.current = 1;
+          setCanvasZoom(1);
+          return;
+        }
+        autoFitSuppressedUntilRef.current = performance.now() + 2000;
+        forceZoomResetUntilRef.current = performance.now() + 1500;
+        if (drawerZoomResetTimeoutRef.current != null) {
+          window.clearTimeout(drawerZoomResetTimeoutRef.current);
+        }
+        if (drawerZoomResetLateTimeoutRef.current != null) {
+          window.clearTimeout(drawerZoomResetLateTimeoutRef.current);
+        }
+        if (drawerZoomResetIntervalRef.current != null) {
+          window.clearInterval(drawerZoomResetIntervalRef.current);
+        }
+        if (drawerZoomResetIntervalStopRef.current != null) {
+          window.clearTimeout(drawerZoomResetIntervalStopRef.current);
+        }
+        if (zoomLockTimeoutRef.current != null) {
+          window.clearTimeout(zoomLockTimeoutRef.current);
+        }
+        setZoomLockActive(true);
+        setCanvasToScale(1, 0);
+        drawerZoomResetTimeoutRef.current = window.setTimeout(() => {
+          setCanvasToScale(1, 0);
+        }, ZOOM_FIT_ANIMATION_MS + 50);
+        drawerZoomResetLateTimeoutRef.current = window.setTimeout(() => {
+          setCanvasToScale(1, 0);
+        }, 800);
+        drawerZoomResetIntervalRef.current = window.setInterval(() => {
+          setCanvasToScale(1, 0);
+        }, 120);
+        drawerZoomResetIntervalStopRef.current = window.setTimeout(() => {
+          if (drawerZoomResetIntervalRef.current != null) {
+            window.clearInterval(drawerZoomResetIntervalRef.current);
+            drawerZoomResetIntervalRef.current = null;
+          }
+        }, 1400);
+        zoomLockTimeoutRef.current = window.setTimeout(() => {
+          setZoomLockActive(false);
+        }, 1500);
+        canvasZoomRef.current = 1;
+        setCanvasZoom(1);
+        return;
+      }
+
+      fitCanvasInView();
+    });
+
+    return () => {
+      window.cancelAnimationFrame(id);
+      if (drawerZoomResetTimeoutRef.current != null) {
+        window.clearTimeout(drawerZoomResetTimeoutRef.current);
+        drawerZoomResetTimeoutRef.current = null;
+      }
+      if (drawerZoomResetLateTimeoutRef.current != null) {
+        window.clearTimeout(drawerZoomResetLateTimeoutRef.current);
+        drawerZoomResetLateTimeoutRef.current = null;
+      }
+      if (drawerZoomResetIntervalRef.current != null) {
+        window.clearInterval(drawerZoomResetIntervalRef.current);
+        drawerZoomResetIntervalRef.current = null;
+      }
+      if (drawerZoomResetIntervalStopRef.current != null) {
+        window.clearTimeout(drawerZoomResetIntervalStopRef.current);
+        drawerZoomResetIntervalStopRef.current = null;
+      }
+      if (zoomLockTimeoutRef.current != null) {
+        window.clearTimeout(zoomLockTimeoutRef.current);
+        zoomLockTimeoutRef.current = null;
+      }
+    };
+  }, [fitCanvasInView, drawerWidth, drawerLength, isMobileLayout, setCanvasToScale]);
+
   const quickActionsAvailable = !(hideQuickActions && isMobileLayout);
+  const mobileActionsLiftPx = isMobileLayout ? Math.max(0, mobileBottomInsetPx - 80) : 0;
+  const mobileActionsBottom = `calc(0.75rem + env(safe-area-inset-bottom) + ${mobileActionsLiftPx}px)`;
+  const mobileActionsToggleBottom = `calc(5rem + env(safe-area-inset-bottom) + ${mobileActionsLiftPx}px)`;
+  const resetActionsPosition = useCallback(() => {
+    setActionsOffset({ x: 0, y: 0 });
+  }, []);
 
   const startActionsDrag = useCallback(
     (clientX: number, clientY: number) => {
+      if (!isMobileLayout) return;
+      const rect = actionsDragElementRef.current?.getBoundingClientRect() ?? null;
       actionsDragRef.current = {
         startX: clientX,
         startY: clientY,
         originX: actionsOffset.x,
-        originY: actionsOffset.y
+        originY: actionsOffset.y,
+        rect
       };
+      actionsClickBlockedRef.current = false;
       setIsDraggingActions(true);
     },
-    [actionsOffset.x, actionsOffset.y]
+    [actionsOffset.x, actionsOffset.y, isMobileLayout]
   );
 
   const handleActionsDragStart = (event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -550,9 +915,24 @@ export function Canvas({
     const handleMove = (event: PointerEvent | MouseEvent) => {
       const drag = actionsDragRef.current;
       if (!drag) return;
+      const distanceX = event.clientX - drag.startX;
+      const distanceY = event.clientY - drag.startY;
+      let clampedDistanceX = distanceX;
+      let clampedDistanceY = distanceY;
+      if (drag.rect) {
+        const minDx = ACTIONS_DRAG_MARGIN_PX - drag.rect.left;
+        const maxDx = window.innerWidth - ACTIONS_DRAG_MARGIN_PX - drag.rect.right;
+        const minDy = ACTIONS_DRAG_MARGIN_PX - drag.rect.top;
+        const maxDy = window.innerHeight - ACTIONS_DRAG_MARGIN_PX - drag.rect.bottom;
+        clampedDistanceX = Math.min(Math.max(distanceX, minDx), maxDx);
+        clampedDistanceY = Math.min(Math.max(distanceY, minDy), maxDy);
+      }
+      if (!actionsClickBlockedRef.current && distanceX * distanceX + distanceY * distanceY > 16) {
+        actionsClickBlockedRef.current = true;
+      }
       setActionsOffset({
-        x: drag.originX + (event.clientX - drag.startX),
-        y: drag.originY + (event.clientY - drag.startY)
+        x: drag.originX + clampedDistanceX,
+        y: drag.originY + clampedDistanceY
       });
     };
     const handleEnd = () => {
@@ -580,11 +960,52 @@ export function Canvas({
     if (!(target instanceof HTMLElement)) return false;
     if (target.closest('[data-testid="placed-bin"]')) return false;
     if (target.closest('[data-testid="placement-editor"]')) return false;
+    if (target.closest('[data-testid="canvas-how-to"]')) return false;
+    if (target.closest('[data-testid="canvas-how-to-collapsed"]')) return false;
+    if (target.closest('[data-tour="quick-actions-pill"]')) return false;
     if (target.closest('button, input, select, textarea, a, [role="button"], [contenteditable="true"]')) {
       return false;
     }
     return true;
   }, []);
+
+  const isTypingTarget = (target: EventTarget | null) => {
+    if (!(target instanceof HTMLElement)) return false;
+    const tagName = target.tagName;
+    const role = target.getAttribute('role');
+    return (
+      tagName === 'INPUT' ||
+      tagName === 'TEXTAREA' ||
+      tagName === 'SELECT' ||
+      role === 'textbox' ||
+      target.isContentEditable
+    );
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (tourActive) return;
+      if (isTypingTarget(event.target)) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const key = event.key.toLowerCase();
+      if (key === 'g') {
+        event.preventDefault();
+        setShowGrid((prev) => !prev);
+      }
+      if (key === 's') {
+        if (placements.length === 0) return;
+        event.preventDefault();
+        handleSuggestLayout();
+      }
+      if (key === 'c') {
+        if (placements.length === 0) return;
+        event.preventDefault();
+        handleClearLayout();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleClearLayout, handleSuggestLayout, placements.length, tourActive]);
 
   const handleCanvasPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (tourActive || paintMode || event.pointerType === 'touch' || event.button !== 0) return;
@@ -623,6 +1044,13 @@ export function Canvas({
   const handleWheelZoom = useCallback((event: WheelEvent) => {
     if (tourActive || paintMode) return;
     if (!shouldStartCanvasPan(event.target)) return;
+    if (!event.ctrlKey && !event.metaKey) {
+      if (!zoomHintShownRef.current) {
+        setToast({ type: 'info', message: 'Hold Ctrl/Cmd + scroll to zoom.' });
+        zoomHintShownRef.current = true;
+      }
+      return;
+    }
     event.preventDefault();
     const normalizedDeltaY = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
     wheelZoomDeltaRef.current += normalizedDeltaY;
@@ -657,27 +1085,6 @@ export function Canvas({
     };
   }, []);
 
-  const handleCanvasInit = useCallback((ref: ReactZoomPanPinchRef) => {
-    transformRef.current = ref;
-    const { scale, positionX, positionY } = ref.state;
-    canvasZoomRef.current = scale;
-    canvasPositionRef.current = { x: positionX, y: positionY };
-    setCanvasZoom(scale);
-    setCanvasPosition({ x: positionX, y: positionY });
-    window.requestAnimationFrame(() => fitCanvasInView());
-  }, [fitCanvasInView]);
-
-  const handleCanvasTransformed = useCallback(
-    (_ref: ReactZoomPanPinchRef, state: { scale: number; positionX: number; positionY: number }) => {
-      const nextScale = clampZoom(state.scale);
-      canvasZoomRef.current = nextScale;
-      canvasPositionRef.current = { x: state.positionX, y: state.positionY };
-      setCanvasZoom(nextScale);
-      setCanvasPosition({ x: state.positionX, y: state.positionY });
-    },
-    [clampZoom]
-  );
-
   const getDrawerScalePx = useCallback(() => {
     const dropArea = dropAreaRef.current;
     if (!dropArea || drawerWidth <= 0 || drawerLength <= 0) return null;
@@ -706,6 +1113,7 @@ export function Canvas({
   };
 
   const selectedPlacementIds = editor?.placementIds ?? [];
+  const selectedCount = selectedPlacementIds.length;
   const selectedPlacement = selectedPlacementIds.length > 0
     ? placements.find((p) => p.id === selectedPlacementIds[0]) ?? null
     : null;
@@ -713,13 +1121,19 @@ export function Canvas({
   const editorPosition = useMemo(() => {
     if (!editor) return null;
     const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : Number.POSITIVE_INFINITY;
+    const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : Number.POSITIVE_INFINITY;
     let left = editor.x + EDITOR_OFFSET_PX;
     if (left + EDITOR_WIDTH_PX + VIEWPORT_PADDING_PX > viewportWidth) {
       left = editor.x - EDITOR_WIDTH_PX - EDITOR_OFFSET_PX;
     }
     const maxLeft = Math.max(VIEWPORT_PADDING_PX, viewportWidth - EDITOR_WIDTH_PX - VIEWPORT_PADDING_PX);
     left = Math.min(Math.max(VIEWPORT_PADDING_PX, left), maxLeft);
-    return { left, top: Math.max(VIEWPORT_PADDING_PX, editor.y + EDITOR_OFFSET_PX) };
+    const maxTop = Math.max(VIEWPORT_PADDING_PX, viewportHeight - EDITOR_HEIGHT_PX - VIEWPORT_PADDING_PX);
+    const top = Math.min(
+      Math.max(VIEWPORT_PADDING_PX, editor.y + EDITOR_OFFSET_PX),
+      maxTop
+    );
+    return { left, top };
   }, [editor]);
 
   const invalidPlacementIds = useMemo(() => {
@@ -864,7 +1278,7 @@ export function Canvas({
   const finalizeDrop = (point: Point, drag: DragItem) => {
     const drop = computeDropPosition(point, drag);
     if (!drop) return;
-    const { rawX, rawY, x: dropX, y: dropY } = drop;
+    const { rawX, rawY, x: dropX, y: dropY, isOutOfBounds } = drop;
     debugLog('raw target (in)', { x: rawX, y: rawY });
     debugLog('clamped target (in)', { x: dropX, y: dropY });
 
@@ -873,6 +1287,15 @@ export function Canvas({
       debugLog('drop result status', result.status);
       if (result.status === 'blocked') {
         setToast({ type: 'error', message: 'No room for that bin.' });
+      }
+      if (result.status === 'autofit') {
+        setToast({ type: 'info', message: 'Placed in nearest available spot.' });
+        if (result.placementId) {
+          triggerHighlight(result.placementId, 'info');
+        }
+      }
+      if (result.status === 'placed' && isOutOfBounds) {
+        setToast({ type: 'info', message: 'Dropped outside drawer — snapped to edge.' });
       }
       if (result.position) {
         debugLog('drop new placement position (in)', { x: result.position.x, y: result.position.y });
@@ -887,6 +1310,14 @@ export function Canvas({
       debugLog('drop result status', result.status);
       if (result.status === 'blocked') {
         setToast({ type: 'error', message: 'Cannot move there — space is full.' });
+        triggerHighlight(drag.placementId, 'error');
+      }
+      if (result.status === 'autofit') {
+        setToast({ type: 'info', message: 'Moved to nearest available spot.' });
+        triggerHighlight(drag.placementId, 'info');
+      }
+      if (result.status === 'placed' && isOutOfBounds) {
+        setToast({ type: 'info', message: 'Dropped outside drawer — snapped to edge.' });
       }
       if (result.position) {
         debugLog('Actual drop moved placement position (in)', { x: result.position.x, y: result.position.y });
@@ -901,6 +1332,7 @@ export function Canvas({
       const drag = event.active.data.current as DragItem | undefined;
       if (!drag) return;
       activeDragRef.current = drag;
+      setBinGhost(null);
       const startPoint = getPointFromEvent(event.activatorEvent);
       pointerOriginRef.current = startPoint;
       if (drag.type === 'placement') {
@@ -933,33 +1365,55 @@ export function Canvas({
       }
     },
     onDragMove(event) {
-      if (!activeDragRef.current) return;
-      if (activeDragRef.current.type !== 'placement') {
-        return;
-      }
+      const drag = activeDragRef.current;
+      if (!drag) return;
 
       const now = performance.now();
       if (now - lastFrameRef.current < FRAME_THROTTLE_MS) return;
       lastFrameRef.current = now;
 
       const delta = getDragDelta(event);
-      const drop = computePlacementTargetFromDelta(delta, activeDragRef.current);
-      if (!drop) return;
+      if (drag.type === 'placement') {
+        const drop = computePlacementTargetFromDelta(delta, drag);
+        if (!drop) return;
 
-      // Use unclamped-to-grid position for live overlap feedback so it flips as soon as boxes intersect.
-      const liveX = Math.max(0, Math.min(drop.rawX, drawerWidth - drop.size.width));
-      const liveY = Math.max(0, Math.min(drop.rawY, drawerLength - drop.size.length));
-      const collision = hasCollisionAt(drop.size, liveX, liveY, activeDragRef.current.placementId);
-      setDragStatus({
-        placementId: activeDragRef.current.placementId,
-        fits: !collision && !drop.isOutOfBounds
-      });
+        // Use unclamped-to-grid position for live overlap feedback so it flips as soon as boxes intersect.
+        const liveX = Math.max(0, Math.min(drop.rawX, drawerWidth - drop.size.width));
+        const liveY = Math.max(0, Math.min(drop.rawY, drawerLength - drop.size.length));
+        const collision = hasCollisionAt(drop.size, liveX, liveY, drag.placementId);
+        setDragStatus({
+          placementId: drag.placementId,
+          fits: !collision && !drop.isOutOfBounds
+        });
+        return;
+      }
+
+      if (drag.type === 'bin') {
+        if (!pointerOriginRef.current) return;
+        const point = applyDelta(pointerOriginRef.current, event.delta);
+        const drop = computeDropPosition(point, drag);
+        if (!drop) {
+          setBinGhost(null);
+          return;
+        }
+        const collision = hasCollisionAt(drop.size, drop.x, drop.y);
+        setBinGhost({
+          x: drop.x,
+          y: drop.y,
+          width: drop.size.width,
+          length: drop.size.length,
+          fits: !collision && !drop.isOutOfBounds,
+          outOfBounds: drop.isOutOfBounds
+        });
+      }
     },
     onDragEnd(event) {
       if (!activeDragRef.current) return;
+      setBinGhost(null);
       const delta = getDragDelta(event);
       debugLog('drag move delta (px)', { x: delta.x, y: delta.y });
       if (activeDragRef.current.type === 'placement' && originPlacementRef.current) {
+        suppressClickUntilRef.current = performance.now() + 250;
         const scalePx = getDrawerScalePx() ?? { x: scaledGridSize, y: scaledGridSize };
         const expectedX = originPlacementRef.current.x + delta.x / scalePx.x;
         const expectedY = originPlacementRef.current.y + delta.y / scalePx.y;
@@ -972,6 +1426,14 @@ export function Canvas({
           debugLog('drop result status', result.status);
           if (result.status === 'blocked') {
             setToast({ type: 'error', message: 'Cannot move there — space is full.' });
+            triggerHighlight(activeDragRef.current.placementId, 'error');
+          }
+          if (result.status === 'autofit') {
+            setToast({ type: 'info', message: 'Moved to nearest available spot.' });
+            triggerHighlight(activeDragRef.current.placementId, 'info');
+          }
+          if (result.status === 'placed' && drop.isOutOfBounds) {
+            setToast({ type: 'info', message: 'Dropped outside drawer — snapped to edge.' });
           }
           if (result.position) {
             debugLog('Actual drop moved placement position (in)', { x: result.position.x, y: result.position.y });
@@ -1003,23 +1465,25 @@ export function Canvas({
       dragOffsetRef.current = null;
       originPlacementRef.current = null;
       setDragStatus(null);
+      setBinGhost(null);
     }
   });
 
   return (
-    <div className={`flex-1 bg-[#F6F7F8] relative overflow-hidden flex flex-col ${paintMode ? 'cursor-copy' : ''}`}>
+    <div className={`flex-1 min-h-0 min-w-0 bg-[#F6F7F8] relative overflow-visible flex flex-col ${paintMode ? 'cursor-copy' : ''}`}>
       {/* Canvas Area */}
       <div
         data-testid="canvas-scroll-container"
         data-canvas-scale={canvasZoom.toFixed(3)}
         data-canvas-x={canvasPosition.x.toFixed(1)}
         data-canvas-y={canvasPosition.y.toFixed(1)}
-        className={`flex-1 ${isMobileLayout ? 'p-4 pt-5 hide-scrollbar' : 'p-12'}`}
+        className={`flex-1 min-h-0 min-w-0 overflow-hidden ${isMobileLayout ? 'p-4 pt-5 hide-scrollbar' : 'p-0'}`}
         style={isMobileLayout && mobileBottomInsetPx > 0 ? { paddingBottom: `${mobileBottomInsetPx}px` } : undefined}
       >
         <div
           ref={canvasViewportRef}
-          className={`h-full w-full ${paintMode ? 'cursor-copy' : isPanningCanvas ? 'cursor-grabbing' : 'cursor-grab'}`}
+          className={`h-full w-full min-h-0 min-w-0 ${paintMode ? 'cursor-copy' : isPanningCanvas ? 'cursor-grabbing' : 'cursor-grab'}`}
+          style={isMobileLayout ? { touchAction: 'none' } : undefined}
           onPointerDown={handleCanvasPointerDown}
           onPointerMove={handleCanvasPointerMove}
           onPointerUp={handleCanvasPointerEnd}
@@ -1027,15 +1491,16 @@ export function Canvas({
           onLostPointerCapture={handleCanvasPointerEnd}
         >
           <TransformWrapper
-            minScale={MIN_CANVAS_ZOOM}
-            maxScale={MAX_CANVAS_ZOOM}
+            key={`${drawerWidth}-${drawerLength}`}
+            minScale={zoomLockActive ? 1 : MIN_CANVAS_ZOOM}
+            maxScale={zoomLockActive ? 1 : MAX_CANVAS_ZOOM}
             centerOnInit
             centerZoomedOut={false}
             limitToBounds={false}
             disablePadding
             smooth
             disabled={tourActive}
-            panning={{ disabled: true }}
+            panning={{ disabled: !isMobileLayout }}
             wheel={{ disabled: true }}
             pinch={{ step: 5 }}
             doubleClick={{ disabled: true }}
@@ -1043,7 +1508,8 @@ export function Canvas({
             onTransformed={handleCanvasTransformed}
           >
             <TransformComponent
-              wrapperClass="h-full w-full !overflow-hidden"
+              wrapperClass="h-full w-full min-h-0 min-w-0 !overflow-hidden"
+              wrapperStyle={{ width: '100%', height: '100%' }}
               contentClass="!w-fit !h-fit"
               wrapperProps={TRANSFORM_WRAPPER_TEST_PROPS}
               contentProps={TRANSFORM_CONTENT_TEST_PROPS}
@@ -1113,23 +1579,41 @@ export function Canvas({
                       />
                     )}
 
+                    {binGhost && (
+                      <div
+                        data-testid="new-bin-ghost"
+                        className="absolute pointer-events-none rounded-sm"
+                        style={{
+                          left: `${binGhost.x * gridSize}px`,
+                          top: `${binGhost.y * gridSize}px`,
+                          width: `${binGhost.width * gridSize}px`,
+                          height: `${binGhost.length * gridSize}px`,
+                          border: `2px dashed ${binGhost.fits ? '#16a34a' : '#dc2626'}`,
+                          backgroundColor: binGhost.fits ? 'rgba(22,163,74,0.08)' : 'rgba(220,38,38,0.08)',
+                          boxShadow: `0 0 0 2px rgba(248, 250, 252, 0.8)`
+                        }}
+                      />
+                    )}
+
                     {placements.map((placement) => {
                       const size = getPlacementSize(placement);
                       if (!size) return null;
                       return (
-                        <DraggablePlacement
-                          key={placement.id}
-                          placement={placement}
-                          size={size}
-                          gridSize={gridSize}
-                          dragStatus={dragStatus}
-                          paintMode={paintMode}
-                          isInvalid={invalidPlacementIds.has(placement.id)}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            if (paintMode) {
-                              paintPlacement(placement.id);
-                              return;
+                      <DraggablePlacement
+                        key={placement.id}
+                        placement={placement}
+                        size={size}
+                        gridSize={gridSize}
+                        dragStatus={dragStatus}
+                        paintMode={paintMode}
+                        isInvalid={invalidPlacementIds.has(placement.id)}
+                        highlight={highlight}
+                        shouldBlockClick={() => performance.now() < suppressClickUntilRef.current}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          if (paintMode) {
+                            paintPlacement(placement.id);
+                            return;
                             }
                             setEditor({ placementIds: [placement.id], x: event.clientX, y: event.clientY });
                             closePlacementEditor();
@@ -1157,7 +1641,7 @@ export function Canvas({
       {!tourActive && showHowTo && (
         <div
           data-testid="canvas-how-to"
-          className={`absolute top-4 left-4 z-40 rounded-xl border border-slate-200 bg-white/95 shadow-lg backdrop-blur p-4 ${
+          className={`absolute top-4 left-4 z-[60] rounded-xl border border-slate-200 bg-white/95 shadow-lg backdrop-blur p-4 ${
             isMobileLayout ? 'w-[calc(100%-2rem)] max-w-sm' : 'w-80'
           }`}
         >
@@ -1169,7 +1653,7 @@ export function Canvas({
             <button
               type="button"
               className="text-xs text-slate-400 hover:text-slate-600"
-              onClick={() => setShowHowTo(false)}
+              onClick={hideHowTo}
             >
               Hide
             </button>
@@ -1192,7 +1676,7 @@ export function Canvas({
       {!tourActive && !showHowTo && (
         <div
           data-testid="canvas-how-to-collapsed"
-          className={`absolute top-4 left-4 z-40 rounded-full border border-slate-200 bg-white/95 shadow-md backdrop-blur px-3 py-2 flex items-center gap-3 ${
+          className={`absolute ${isMobileLayout ? 'top-4' : 'top-16'} left-4 z-[60] rounded-full border border-slate-200 bg-white/95 shadow-md backdrop-blur px-3 py-2 flex items-center gap-3 ${
             isMobileLayout ? 'max-w-[calc(100%-2rem)]' : ''
           }`}
         >
@@ -1200,222 +1684,257 @@ export function Canvas({
           <button
             type="button"
             className="text-xs font-medium text-[#14476B] hover:text-[#1a5a8a]"
-            onClick={() => setShowHowTo(true)}
+            onClick={showHowToCard}
           >
             Show
           </button>
         </div>
       )}
 
-      {quickActionsAvailable && quickActionsOpen && (
+      {quickActionsAvailable && !showHowTo && isMobileLayout && quickActionsOpen && (
         <div
           data-tour="quick-actions-pill"
           data-actions-offset-x={actionsOffset.x.toFixed(1)}
           data-actions-offset-y={actionsOffset.y.toFixed(1)}
+          ref={(node) => {
+            actionsDragElementRef.current = node;
+          }}
           onPointerDownCapture={handleActionsContainerPointerDown}
           onMouseDownCapture={handleActionsContainerMouseDown}
-          className={
-            isMobileLayout
-              ? 'absolute bottom-3 left-2 right-2 bg-white/90 backdrop-blur shadow-lg border border-slate-200 rounded-2xl px-3 py-2 flex flex-wrap justify-center gap-3 relative'
-              : 'absolute bottom-6 left-1/2 -translate-x-1/2 bg-white/90 backdrop-blur shadow-lg border border-slate-200 rounded-2xl px-4 py-2 flex items-start gap-5 relative'
-          }
-          style={
-            isMobileLayout
-              ? { transform: `translate(${actionsOffset.x}px, ${actionsOffset.y}px)` }
-              : { transform: `translate(-50%, 0) translate(${actionsOffset.x}px, ${actionsOffset.y}px)` }
-          }
+          className={`absolute left-2 right-2 bg-white/90 backdrop-blur shadow-lg border border-slate-200 rounded-2xl px-3 py-2 flex flex-col gap-3 relative z-50 ${
+            disableQuickActions ? 'pointer-events-none' : ''
+          }`}
+          style={{ transform: `translate(${actionsOffset.x}px, ${actionsOffset.y}px)`, bottom: mobileActionsBottom }}
         >
           <button
             type="button"
             ref={actionsHandleRef}
             data-testid="quick-actions-drag-handle"
             aria-label="Drag quick actions"
-            title="Drag quick actions"
+            title="Drag quick actions (double click to reset)"
             onPointerDown={handleActionsDragStart}
             onMouseDown={handleActionsMouseDown}
-            onDoubleClick={() => setActionsOffset({ x: 0, y: 0 })}
-            className={`absolute -top-3 left-1/2 -translate-x-1/2 h-6 px-2 rounded-full border border-slate-200 bg-white text-slate-500 flex items-center justify-center ${
+            onDoubleClick={resetActionsPosition}
+            className={`absolute -top-3 left-1/2 -translate-x-1/2 h-7 px-3 rounded-full border border-slate-200 bg-white text-slate-500 flex items-center justify-center gap-1 text-[10px] font-semibold uppercase tracking-wide ${
               isDraggingActions ? 'cursor-grabbing' : 'cursor-grab'
             } touch-none`}
           >
             <GripHorizontal className="h-3.5 w-3.5" />
+            Drag
           </button>
-          <div className="flex flex-col items-center gap-1">
-            <span className="text-xs uppercase tracking-wide text-slate-400">History</span>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={undo}
-                disabled={!canUndo}
-                title="Undo (Ctrl/Cmd+Z)"
-                className={`hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600 ${
-                  isMobileLayout ? 'h-11 w-11' : 'p-2'
-                }`}
-              >
-                <RotateCcw className="h-4 w-4" />
-              </button>
-              <button
-                onClick={redo}
-                disabled={!canRedo}
-                title="Redo (Shift+Ctrl/Cmd+Z)"
-                className={`hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600 ${
-                  isMobileLayout ? 'h-11 w-11' : 'p-2'
-                }`}
-              >
-                <RotateCw className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
 
-          <div className={`w-px bg-slate-200 self-stretch my-1 ${isMobileLayout ? 'hidden' : ''}`} />
-
-          <div className="flex flex-col items-center gap-1">
-            <span className="text-xs uppercase tracking-wide text-slate-400">Grid</span>
-            <button
-              onClick={() => setShowGrid(!showGrid)}
-              title="Toggle grid"
-              className={`rounded-full transition-colors ${isMobileLayout ? 'h-11 w-11' : 'p-2'} ${
-                showGrid ? 'bg-[#14476B]/10 text-[#14476B]' : 'hover:bg-slate-100 text-slate-600'
-              }`}
-            >
-              <Grid className="h-4 w-4" />
-            </button>
-          </div>
-
-          <div className={`w-px bg-slate-200 self-stretch my-1 ${isMobileLayout ? 'hidden' : ''}`} />
-
-          <div className="flex flex-col items-center gap-1">
-            <span className="text-xs uppercase tracking-wide text-slate-400">Grid Size</span>
-            <input
-              aria-label="Snap to grid"
-              title="Snap to the nearest grid line (inches)"
-              type="number"
-              min={0.5}
-              max={2}
-              step={0.5}
-              value={snap}
-              onChange={(e) => setSnap(clampSnap(Number(e.target.value) || 0.5))}
-              className={`w-14 px-2 ${isMobileLayout ? 'py-2 min-h-10' : 'py-1'} text-xs rounded-md border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#14476B]/20`}
-            />
-          </div>
-
-          <div className={`w-px bg-slate-200 self-stretch my-1 ${isMobileLayout ? 'hidden' : ''}`} />
-
-          <div className="flex flex-col items-center gap-1">
-            <span className="text-xs uppercase tracking-wide text-slate-400">Zoom</span>
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                aria-label="Zoom out"
-                title="Zoom out"
-                disabled={canvasZoom <= MIN_CANVAS_ZOOM}
-                onClick={() => zoomCanvas(canvasZoomRef.current - 0.1)}
-                className={`hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600 ${
-                  isMobileLayout ? 'h-11 w-11' : 'p-2'
-                }`}
-              >
-                <ZoomOut className="h-4 w-4" />
-              </button>
-              <span className="w-12 text-center text-xs font-medium text-slate-600">
-                <span data-testid="canvas-zoom-value">
-                {Math.round(canvasZoom * 100)}%
-                </span>
-              </span>
-              <button
-                type="button"
-                aria-label="Zoom in"
-                title="Zoom in"
-                disabled={canvasZoom >= MAX_CANVAS_ZOOM}
-                onClick={() => zoomCanvas(canvasZoomRef.current + 0.1)}
-                className={`hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600 ${
-                  isMobileLayout ? 'h-11 w-11' : 'p-2'
-                }`}
-              >
-                <ZoomIn className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-
-          <div className={`w-px bg-slate-200 self-stretch my-1 ${isMobileLayout ? 'hidden' : ''}`} />
-
-          <div data-tour="canvas-actions" className="flex flex-col items-center gap-1">
-            <span className="text-xs uppercase tracking-wide text-slate-400">Actions</span>
-            <div className="flex items-center gap-1">
-              <Button
-                data-testid="home-canvas-button"
-                size="sm"
-                variant="ghost"
-                className={`text-slate-700 ${isMobileLayout ? 'min-h-10 px-3' : ''}`}
-                leftIcon={<House className="h-3 w-3" />}
-                onClick={fitCanvasInView}
-              >
-                {isMobileLayout ? 'Home' : 'Home Canvas'}
-              </Button>
-              <Button
-                data-testid="suggest-layout-button"
-                size="sm"
-                variant="ghost"
-                className={`text-[#14476B] ${isMobileLayout ? 'min-h-10 px-3' : ''}`}
-                leftIcon={<Sparkles className="h-3 w-3" />}
-                onClick={handleSuggestLayout}
-                disabled={placements.length === 0}
-              >
-                Suggest Layout
-              </Button>
-              <Button
-                data-testid="clear-layout-button"
-                size="sm"
-                variant="ghost"
-                className={`text-slate-600 ${isMobileLayout ? 'min-h-10 px-3' : ''}`}
-                leftIcon={<Trash2 className="h-3 w-3" />}
-                onClick={clearPlacements}
-                disabled={placements.length === 0}
-              >
-                Clear
-              </Button>
-              <Button
-                data-testid="paint-mode-toggle"
-                data-tour="paint-action"
-                size="sm"
-                variant="ghost"
-                className={`${paintMode ? 'text-[#14476B] bg-[#14476B]/10' : 'text-slate-600'} ${isMobileLayout ? 'min-h-10 px-3' : ''}`}
-                leftIcon={<PaintBucket className="h-3 w-3" />}
-                onClick={togglePaintMode}
-                disabled={placements.length === 0}
-                aria-label={paintMode ? 'Disable paint mode' : 'Enable paint mode'}
-              >
-                {paintMode ? '' : 'Paint Bins'}
-              </Button>
-              {paintMode && (
-                <select
-                  data-testid="paint-color-select"
-                  value={paintColorSelection}
-                  onChange={(e) => handlePaintColorSelectionChange(e.target.value)}
-                  className={`w-28 rounded-md border border-slate-200 px-2 ${isMobileLayout ? 'py-2 min-h-10' : 'py-1'} text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#14476B]/20`}
+          <div className="flex flex-wrap items-center justify-center gap-4">
+            <div className="flex flex-col items-center gap-1">
+              <span className="text-xs uppercase tracking-wide text-slate-400">History</span>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={undo}
+                  disabled={!canUndo}
+                  title="Undo (Ctrl/Cmd+Z)"
+                  aria-label="Undo"
+                  className="hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600 h-11 w-11"
                 >
-                  {PRESET_COLORS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                  <option value={CUSTOM_COLOR_VALUE}>Custom</option>
-                </select>
-              )}
-              {paintMode && paintColorSelection === CUSTOM_COLOR_VALUE && (
-                <input
-                  data-testid="paint-color-custom"
-                  aria-label="Paint custom color"
-                  type="color"
-                  value={paintColorDraft}
-                  onChange={(e) => handlePaintColorChange(e.target.value)}
-                  className="h-7 w-10 rounded-md border border-slate-200 bg-white"
-                />
-              )}
+                  <RotateCcw className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={redo}
+                  disabled={!canRedo}
+                  title="Redo (Shift+Ctrl/Cmd+Z)"
+                  aria-label="Redo"
+                  className="hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600 h-11 w-11"
+                >
+                  <RotateCw className="h-4 w-4" />
+                </button>
+              </div>
             </div>
+
+            <div className="flex flex-col items-center gap-1">
+              <span className="text-xs uppercase tracking-wide text-slate-400">Grid</span>
+              <button
+                onClick={() => setShowGrid(!showGrid)}
+                title="Toggle grid (G)"
+                aria-label="Toggle grid"
+                aria-pressed={showGrid}
+                className={`rounded-full transition-colors h-11 w-11 ${
+                  showGrid ? 'bg-[#14476B]/10 text-[#14476B]' : 'hover:bg-slate-100 text-slate-600'
+                }`}
+              >
+                <Grid className="h-4 w-4" />
+              </button>
+            </div>
+
+            {!isQuickActionsMini && (
+              <div className="flex flex-col items-center gap-1">
+                <span className="text-xs uppercase tracking-wide text-slate-400">Snap</span>
+                <div className="flex items-center gap-1">
+                  <input
+                    ref={snapInputRef}
+                    aria-label="Snap to grid"
+                    title="Snap to the nearest grid line (inches)"
+                    type="number"
+                    min={SNAP_MIN}
+                    max={SNAP_MAX}
+                    step={0.5}
+                    value={snapDraft}
+                    inputMode="decimal"
+                    onChange={(e) => handleSnapInputChange(e.target.value)}
+                    onBlur={commitSnapInput}
+                    aria-invalid={Boolean(snapHelper)}
+                    aria-describedby={snapHelper ? 'snap-helper' : undefined}
+                    className="w-14 px-2 py-2 min-h-10 text-xs rounded-md border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#14476B]/20"
+                  />
+                  <span className="text-[10px] text-slate-400">in</span>
+                </div>
+                {snapHelper && (
+                  <span id="snap-helper" className="text-[10px] text-amber-600">
+                    {snapHelper}
+                  </span>
+                )}
+              </div>
+            )}
+
+            {!isQuickActionsMini && (
+              <div className="flex flex-col items-center gap-1">
+                <span className="text-xs uppercase tracking-wide text-slate-400">View</span>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    aria-label="Zoom out"
+                    title="Zoom out"
+                    disabled={canvasZoom <= MIN_CANVAS_ZOOM}
+                    onClick={() => zoomCanvas(canvasZoomRef.current - 0.1)}
+                    className="hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600 h-11 w-11"
+                  >
+                    <ZoomOut className="h-4 w-4" />
+                  </button>
+                  <span className="w-12 text-center text-xs font-medium text-slate-600">
+                    <span data-testid="canvas-zoom-value">{Math.round(canvasZoom * 100)}%</span>
+                  </span>
+                  <button
+                    type="button"
+                    aria-label="Zoom in"
+                    title="Zoom in"
+                    disabled={canvasZoom >= MAX_CANVAS_ZOOM}
+                    onClick={() => zoomCanvas(canvasZoomRef.current + 0.1)}
+                    className="hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600 h-11 w-11"
+                  >
+                    <ZoomIn className="h-4 w-4" />
+                  </button>
+                  <Button
+                    data-testid="home-canvas-button"
+                    size="sm"
+                    variant="ghost"
+                    title="Home canvas"
+                    aria-label="Home canvas"
+                    className="min-h-10 px-3 text-slate-700"
+                    leftIcon={<House className="h-3 w-3" />}
+                    onClick={fitCanvasInView}
+                  >
+                    Home
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
 
-          <div className={`w-px bg-slate-200 self-stretch my-1 ${isMobileLayout ? 'hidden' : ''}`} />
+          {!isQuickActionsMini && (
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              <div data-tour="canvas-actions" className="flex flex-col items-center gap-1">
+                <span className="text-xs uppercase tracking-wide text-slate-400">Layout</span>
+                {hasPlacements ? (
+                  <div className="flex flex-wrap items-center justify-center gap-2">
+                    <Button
+                      data-testid="suggest-layout-button"
+                      size="sm"
+                      variant="ghost"
+                      className="text-[#14476B] min-h-10 px-3"
+                      leftIcon={<Sparkles className="h-3 w-3" />}
+                      title="Suggest layout (S)"
+                      onClick={handleSuggestLayout}
+                    >
+                      {`Suggest (${suggestModeLabel})`}
+                    </Button>
+                    <Button
+                      data-testid="clear-layout-button"
+                      size="sm"
+                      variant="ghost"
+                      className="text-slate-600 min-h-10 px-3"
+                      leftIcon={<Trash2 className="h-3 w-3" />}
+                      title="Clear layout (C)"
+                      onClick={handleClearLayout}
+                    >
+                      Clear
+                    </Button>
+                    <div className="flex flex-col items-center gap-1">
+                      <Button
+                        data-testid="paint-mode-toggle"
+                        data-tour="paint-action"
+                        size="sm"
+                        variant="ghost"
+                        className={`${paintMode ? 'text-[#14476B] bg-[#14476B]/10' : 'text-slate-600'} min-h-10 px-3`}
+                        leftIcon={<PaintBucket className="h-3 w-3" />}
+                        onClick={togglePaintMode}
+                        aria-label={paintMode ? 'Disable paint mode' : 'Enable paint mode'}
+                        aria-pressed={paintMode}
+                      >
+                        {paintMode ? 'Paint On' : 'Paint'}
+                      </Button>
+                      {paintMode && (
+                        <select
+                          data-testid="paint-color-select"
+                          value={paintColorSelection}
+                          onChange={(e) => handlePaintColorSelectionChange(e.target.value)}
+                          aria-label="Paint color"
+                          className="w-28 rounded-md border border-slate-200 px-2 py-2 min-h-10 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#14476B]/20"
+                        >
+                          {PRESET_COLORS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                          <option value={CUSTOM_COLOR_VALUE}>Custom</option>
+                        </select>
+                      )}
+                      {paintMode && paintColorSelection === CUSTOM_COLOR_VALUE && (
+                        <input
+                          data-testid="paint-color-custom"
+                          aria-label="Paint custom color"
+                          type="color"
+                          value={paintColorDraft}
+                          onChange={(e) => handlePaintColorChange(e.target.value)}
+                          className="h-7 w-10 rounded-md border border-slate-200 bg-white"
+                        />
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-xs text-slate-400">Add a bin to enable layout tools.</div>
+                )}
+              </div>
+            </div>
+          )}
 
-          <div className="flex items-center">
+          <div className="flex items-center gap-2">
+            {!isQuickActionsMini && (
+              <button
+                type="button"
+                onClick={resetActionsPosition}
+                className="rounded-full text-slate-600 hover:bg-slate-100 flex items-center justify-center gap-1 h-11 px-3"
+              >
+                <span className="text-xs font-semibold uppercase tracking-wide">Reset</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setQuickActionsMode(isQuickActionsMini ? 'full' : 'mini')}
+              className="rounded-full text-slate-600 hover:bg-slate-100 flex items-center justify-center gap-1 h-11 px-3"
+            >
+              <span className="text-xs font-semibold uppercase tracking-wide">
+                {isQuickActionsMini ? 'More' : 'Less'}
+              </span>
+            </button>
             <button
               type="button"
               data-testid="quick-actions-toggle"
@@ -1423,18 +1942,240 @@ export function Canvas({
               aria-label="Collapse quick actions"
               title="Collapse quick actions"
               onClick={() => setQuickActionsOpen(false)}
-              className={`rounded-full text-slate-600 hover:bg-slate-100 flex items-center justify-center gap-1 ${
-                isMobileLayout ? 'h-11 px-3' : 'p-2'
-              }`}
+              className="rounded-full text-slate-600 hover:bg-slate-100 flex items-center justify-center gap-1 h-11 px-3"
             >
               <ChevronDown className="h-4 w-4" />
-              {isMobileLayout && <span className="text-xs font-semibold uppercase tracking-wide">Hide</span>}
+              <span className="text-xs font-semibold uppercase tracking-wide">Hide</span>
             </button>
           </div>
         </div>
       )}
 
-      {quickActionsAvailable && !quickActionsOpen && (
+      {paintMode && (
+        <button
+          type="button"
+          data-testid="paint-mode-indicator"
+          onClick={() => setPaintMode(false)}
+          className="absolute top-4 right-4 z-[60] rounded-full border border-[#14476B]/20 bg-white/95 shadow-md backdrop-blur px-3 py-2 flex items-center gap-2 text-xs font-semibold text-[#14476B] hover:bg-[#14476B]/10"
+        >
+          <PaintBucket className="h-3.5 w-3.5" />
+          Paint On
+          <span className="text-[10px] font-medium text-slate-500">Tap to exit</span>
+        </button>
+      )}
+
+      {quickActionsAvailable && !showHowTo && !isMobileLayout && (
+        <div
+          data-tour="quick-actions-pill"
+          className="absolute top-4 inset-x-0 z-50 flex justify-center pointer-events-none px-4"
+        >
+          <div
+            className={`bg-white/90 backdrop-blur shadow-lg border border-slate-200 rounded-2xl px-3 py-2 inline-flex items-center gap-2 w-full max-w-[720px] ${
+              disableQuickActions ? 'pointer-events-none' : 'pointer-events-auto'
+            }`}
+          >
+            <div className="flex flex-wrap items-end justify-center gap-x-2 gap-y-2 xl:flex-nowrap">
+              <div className="flex flex-col items-center gap-1">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 leading-none">History</span>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={undo}
+                    disabled={!canUndo}
+                    title="Undo (Ctrl/Cmd+Z)"
+                    aria-label="Undo"
+                    className="hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600 p-2"
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={redo}
+                    disabled={!canRedo}
+                    title="Redo (Shift+Ctrl/Cmd+Z)"
+                    aria-label="Redo"
+                    className="hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600 p-2"
+                  >
+                    <RotateCw className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="hidden xl:block w-px bg-slate-200 h-8" />
+
+              <div className="flex flex-col items-center gap-1">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 leading-none">Grid</span>
+                <button
+                  onClick={() => setShowGrid(!showGrid)}
+                  title="Toggle grid (G)"
+                  aria-label="Toggle grid"
+                  aria-pressed={showGrid}
+                  className={`rounded-full transition-colors p-2 ${
+                    showGrid ? 'bg-[#14476B]/10 text-[#14476B]' : 'hover:bg-slate-100 text-slate-600'
+                  }`}
+                >
+                  <Grid className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="hidden xl:block w-px bg-slate-200 h-8" />
+
+              <div className="flex flex-col items-center gap-1">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 leading-none">Snap</span>
+                <div className="flex items-center gap-1">
+                  <input
+                    ref={snapInputRef}
+                    aria-label="Snap to grid"
+                    title="Snap to the nearest grid line (inches)"
+                    type="number"
+                    min={SNAP_MIN}
+                    max={SNAP_MAX}
+                    step={0.5}
+                    value={snapDraft}
+                    inputMode="decimal"
+                    onChange={(e) => handleSnapInputChange(e.target.value)}
+                    onBlur={commitSnapInput}
+                    aria-invalid={Boolean(snapHelper)}
+                    aria-describedby={snapHelper ? 'snap-helper' : undefined}
+                    className="w-12 px-2 py-1 text-xs rounded-md border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#14476B]/20"
+                  />
+                  <span className="text-[10px] text-slate-400">in</span>
+                </div>
+                {snapHelper && (
+                  <span id="snap-helper" className="text-[10px] text-amber-600">
+                    {snapHelper}
+                  </span>
+                )}
+              </div>
+
+              <div className="hidden xl:block w-px bg-slate-200 h-8" />
+
+              <div className="flex flex-col items-center gap-1">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 leading-none">View</span>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    aria-label="Zoom out"
+                    title="Zoom out"
+                    disabled={canvasZoom <= MIN_CANVAS_ZOOM}
+                    onClick={() => zoomCanvas(canvasZoomRef.current - 0.1)}
+                    className="hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600 p-2"
+                  >
+                    <ZoomOut className="h-4 w-4" />
+                  </button>
+                  <span className="w-10 text-center text-xs font-medium text-slate-600">
+                    <span data-testid="canvas-zoom-value">
+                      {Math.round(canvasZoom * 100)}%
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    aria-label="Zoom in"
+                    title="Zoom in"
+                    disabled={canvasZoom >= MAX_CANVAS_ZOOM}
+                    onClick={() => zoomCanvas(canvasZoomRef.current + 0.1)}
+                    className="hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600 p-2"
+                  >
+                    <ZoomIn className="h-4 w-4" />
+                  </button>
+                  <Button
+                    data-testid="home-canvas-button"
+                    size="sm"
+                    variant="ghost"
+                    title="Home canvas"
+                    aria-label="Home canvas"
+                    className="text-slate-700 px-2"
+                    leftIcon={<House className="h-3 w-3" />}
+                    onClick={fitCanvasInView}
+                  >
+                    Home
+                  </Button>
+                </div>
+              </div>
+
+              <div className="hidden xl:block w-px bg-slate-200 h-8" />
+
+              <div data-tour="canvas-actions" className="flex flex-col items-center gap-1">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 leading-none">Layout</span>
+                {hasPlacements ? (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      data-testid="suggest-layout-button"
+                      size="sm"
+                      variant="ghost"
+                      className="text-[#14476B] px-2"
+                      leftIcon={<Sparkles className="h-3 w-3" />}
+                      title="Suggest layout (S)"
+                      onClick={handleSuggestLayout}
+                    >
+                      {`Suggest (${suggestModeLabel})`}
+                    </Button>
+                    <Button
+                      data-testid="clear-layout-button"
+                      size="sm"
+                      variant="ghost"
+                      className="text-slate-600 px-2"
+                      leftIcon={<Trash2 className="h-3 w-3" />}
+                      title="Clear layout (C)"
+                      onClick={handleClearLayout}
+                    >
+                      Clear
+                    </Button>
+                    <div className="flex flex-col items-center gap-1">
+                      <Button
+                        data-testid="paint-mode-toggle"
+                        data-tour="paint-action"
+                        size="sm"
+                        variant="ghost"
+                        className={`${paintMode ? 'text-[#14476B] bg-[#14476B]/10' : 'text-slate-600'} px-2`}
+                        leftIcon={<PaintBucket className="h-3 w-3" />}
+                        onClick={togglePaintMode}
+                        aria-label={paintMode ? 'Disable paint mode' : 'Enable paint mode'}
+                        aria-pressed={paintMode}
+                      >
+                        {paintMode ? 'Paint On' : 'Paint'}
+                      </Button>
+                      {paintMode && (
+                        <select
+                          data-testid="paint-color-select"
+                          value={paintColorSelection}
+                          onChange={(e) => handlePaintColorSelectionChange(e.target.value)}
+                          aria-label="Paint color"
+                          className="w-24 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#14476B]/20"
+                        >
+                          {PRESET_COLORS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                          <option value={CUSTOM_COLOR_VALUE}>Custom</option>
+                        </select>
+                      )}
+                      {paintMode && paintColorSelection === CUSTOM_COLOR_VALUE && (
+                        <input
+                          data-testid="paint-color-custom"
+                          aria-label="Paint custom color"
+                          type="color"
+                          value={paintColorDraft}
+                          onChange={(e) => handlePaintColorChange(e.target.value)}
+                          className="h-7 w-10 rounded-md border border-slate-200 bg-white"
+                        />
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-[10px] text-slate-400">Add a bin to enable layout tools.</div>
+                )}
+              </div>
+
+              <div className="hidden xl:block w-px bg-slate-200 h-8" />
+
+            </div>
+          </div>
+        </div>
+      )}
+
+      {quickActionsAvailable && !showHowTo && isMobileLayout && !quickActionsOpen && (
         <button
           type="button"
           data-testid="quick-actions-toggle"
@@ -1443,15 +2184,30 @@ export function Canvas({
           aria-expanded={quickActionsOpen}
           aria-label="Expand quick actions"
           title="Expand quick actions"
-          onClick={() => setQuickActionsOpen(true)}
-          className={`absolute z-30 rounded-full border border-slate-200 bg-white/95 backdrop-blur shadow-md text-slate-700 flex items-center gap-2 ${
+          ref={(node) => {
+            actionsDragElementRef.current = node;
+          }}
+          onPointerDown={(event) => {
+            if (event.button !== 0) return;
+            startActionsDrag(event.clientX, event.clientY);
+          }}
+          onClick={(event) => {
+            if (actionsClickBlockedRef.current) {
+              actionsClickBlockedRef.current = false;
+              event.preventDefault();
+              event.stopPropagation();
+              return;
+            }
+            setQuickActionsOpen(true);
+          }}
+          className={`absolute z-50 rounded-full border border-slate-200 bg-white/95 backdrop-blur shadow-md text-slate-700 flex items-center gap-2 ${
             isMobileLayout
-              ? 'bottom-20 right-3 px-3 h-11'
+              ? 'right-3 px-3 h-11'
               : 'bottom-6 left-1/2 -translate-x-1/2 px-3 h-10'
-          }`}
+          } ${isDraggingActions ? 'cursor-grabbing' : 'cursor-grab'}`}
           style={
             isMobileLayout
-              ? { transform: `translate(${actionsOffset.x}px, ${actionsOffset.y}px)` }
+              ? { transform: `translate(${actionsOffset.x}px, ${actionsOffset.y}px)`, bottom: mobileActionsToggleBottom }
               : { transform: `translate(-50%, 0) translate(${actionsOffset.x}px, ${actionsOffset.y}px)` }
           }
         >
@@ -1483,6 +2239,7 @@ export function Canvas({
               Label
               <input
                 data-testid="placement-label"
+                ref={labelInputRef}
                 type="text"
                 value={labelDraft}
                 onChange={(e) => setLabelDraft(e.target.value)}
@@ -1585,14 +2342,14 @@ export function Canvas({
               size="sm"
               variant="ghost"
               className="w-full justify-center text-red-600 hover:bg-red-50"
-              aria-label="Delete bin"
+              aria-label={`Delete ${selectedCount} bin${selectedCount === 1 ? '' : 's'}`}
               leftIcon={<Trash2 className="h-3 w-3" />}
               onClick={() => {
-                removePlacement(selectedPlacement.id);
+                removePlacements(selectedPlacementIds);
                 closeEditor();
               }}
             >
-              Delete Bin
+              Delete {selectedCount === 1 ? 'Bin' : 'Bins'}
             </Button>
           </div>
         </div>
@@ -1600,6 +2357,9 @@ export function Canvas({
 
       {toast && (
         <div
+          role={toast.type === 'error' ? 'alert' : 'status'}
+          aria-live={toast.type === 'error' ? 'assertive' : 'polite'}
+          aria-atomic="true"
           className={`absolute top-4 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-full shadow-md text-sm ${
             toast.type === 'error' ? 'bg-red-100 text-red-700' : 'bg-slate-900 text-white'
           }`}
@@ -1608,7 +2368,7 @@ export function Canvas({
         </div>
       )}
 
-      {tourActive && tourStepIndex === 3 && (
+      {tourActive && activeTourStep?.selector === '[data-tour="tour-bin-editor"]' && (
         <div
           data-tour="tour-bin-editor"
           className="fixed z-[61] w-60 rounded-xl border border-slate-200 bg-white shadow-xl p-3 text-sm pointer-events-none"
@@ -1676,7 +2436,7 @@ export function Canvas({
                   Skip
                 </button>
                 <Button size="sm" onClick={nextTourStep}>
-                  {tourStepIndex === TOUR_STEPS.length - 1 ? 'Done' : 'Next'}
+                  {tourStepIndex === tourSteps.length - 1 ? 'Done' : 'Next'}
                 </Button>
               </div>
             </div>
@@ -1693,6 +2453,8 @@ function DraggablePlacement({
   gridSize,
   dragStatus,
   paintMode,
+  highlight,
+  shouldBlockClick,
   onClick,
   isInvalid
 }: {
@@ -1701,6 +2463,8 @@ function DraggablePlacement({
   gridSize: number;
   dragStatus: { placementId: string; fits: boolean } | null;
   paintMode: boolean;
+  highlight?: { id: string; type: 'info' | 'error' } | null;
+  shouldBlockClick?: () => boolean;
   onClick: (event: ReactMouseEvent<HTMLDivElement>) => void;
   isInvalid: boolean;
 }) {
@@ -1722,19 +2486,31 @@ function DraggablePlacement({
   const boxShadow = actionRingColor
     ? `0 0 0 2px rgba(248, 250, 252, 0.95), 0 0 0 4px ${actionRingColor}`
     : undefined;
+  const isHighlighted = highlight?.id === placement.id;
+  const highlightColor = highlight?.type === 'error' ? '#dc2626' : '#22c55e';
 
   const translate = transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined;
   const backgroundColor = placement.color ?? DEFAULT_BIN_COLOR;
+  const colorLabel = getColorLabel(backgroundColor);
+  const sizeLabel = `${size.length} by ${size.width} inches`;
+  const ariaLabelParts = [
+    placement.label ? placement.label : null,
+    `Bin ${sizeLabel}`,
+    colorLabel,
+    isInvalid ? 'Needs attention' : null
+  ].filter(Boolean) as string[];
+  const ariaLabel = ariaLabelParts.join(', ');
   const dragAttributes = paintMode ? undefined : attributes;
   const dragListeners = paintMode ? undefined : listeners;
 
   return (
     <div
       data-testid="placed-bin"
+      aria-label={ariaLabel}
       ref={setNodeRef}
       className={`absolute bg-white border border-slate-300 shadow-sm hover:shadow-md hover:border-[#14476B] hover:z-10 transition-all group flex items-center justify-center ${
         paintMode ? 'cursor-copy' : 'cursor-move'
-      }`}
+      } ${isHighlighted ? 'animate-pulse' : ''}`}
       style={{
         left: `${placement.x * gridSize}px`,
         top: `${placement.y * gridSize}px`,
@@ -1748,10 +2524,12 @@ function DraggablePlacement({
         borderWidth: actionState === 'idle' ? undefined : '2px',
         boxShadow,
         backgroundColor,
-        color: getContrastText(backgroundColor)
+        color: getContrastText(backgroundColor),
+        outline: isHighlighted ? `2px solid ${highlightColor}` : undefined,
+        outlineOffset: isHighlighted ? '2px' : undefined
       }}
       onClick={(event) => {
-        if (isDragging) return;
+        if (isDragging || shouldBlockClick?.()) return;
         onClick(event);
       }}
       {...dragListeners}
@@ -1767,7 +2545,7 @@ function DraggablePlacement({
           {size.length}" x {size.width}"
         </span>
         <span className="text-[10px] font-medium leading-none opacity-90">
-          {getColorLabel(backgroundColor)}
+          {colorLabel}
         </span>
       </div>
       <div className="absolute bottom-1 right-1 w-1.5 h-1.5 rounded-full bg-slate-300 opacity-0 group-hover:opacity-100" />

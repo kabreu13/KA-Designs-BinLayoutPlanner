@@ -36,7 +36,7 @@ test('blocked add keeps placement count unchanged', async ({ page }) => {
   await expect(page.locator(PLACED)).toHaveCount(1);
 });
 
-test('auto-fit placement does not show an info toast', async ({ page }) => {
+test('auto-fit placement shows an info toast', async ({ page }) => {
   await page.goto('/');
   await ensureCatalogExpanded(page);
 
@@ -46,5 +46,5 @@ test('auto-fit placement does not show an info toast', async ({ page }) => {
   await expect(page.locator(PLACED)).toHaveCount(2);
   await dragPlacedBinOntoAnother(page, 1, 0);
   await expect(page.locator(PLACED)).toHaveCount(2);
-  await expect(page.getByText(/Auto-fit to/)).toHaveCount(0);
+  await expect(page.getByText('Moved to nearest available spot.')).toBeVisible();
 });

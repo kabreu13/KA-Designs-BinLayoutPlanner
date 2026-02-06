@@ -45,6 +45,7 @@ export type PlacementResultStatus = 'placed' | 'autofit' | 'blocked';
 export interface PlacementResult {
   status: PlacementResultStatus;
   position?: { x: number; y: number };
+  placementId?: string;
 }
 
 export type SuggestLayoutStatus = 'applied' | 'blocked';
@@ -66,6 +67,7 @@ interface LayoutContextValue {
   updatePlacement: (placementId: string, updates: Partial<Pick<Placement, 'width' | 'length' | 'color' | 'label'>>) => PlacementResult;
   updatePlacements: (placementIds: string[], updates: Partial<Pick<Placement, 'width' | 'length' | 'color' | 'label'>>) => PlacementResult;
   removePlacement: (placementId: string) => void;
+  removePlacements: (placementIds: string[]) => void;
   clearPlacements: () => void;
   activePlacementEditor: { placementIds: string[]; x: number; y: number } | null;
   openPlacementEditor: (placementIds: string[], x: number, y: number) => void;
@@ -144,6 +146,33 @@ const getPlacementSize = (placement: Pick<Placement, 'binId' | 'width' | 'length
   const width = placement.width ?? bin.width;
   const length = placement.length ?? bin.length;
   return { width, length };
+};
+
+const isLayoutValid = (
+  placements: Placement[],
+  drawerWidth: number,
+  drawerLength: number,
+  targetIds?: Set<string>
+) => {
+  for (const placement of placements) {
+    if (targetIds && !targetIds.has(placement.id)) {
+      continue;
+    }
+    const size = getPlacementSize(placement);
+    if (!size) return false;
+    if (
+      placement.x < 0 ||
+      placement.y < 0 ||
+      placement.x + size.width > drawerWidth ||
+      placement.y + size.length > drawerLength
+    ) {
+      return false;
+    }
+    if (hasCollision(size, placement.x, placement.y, placements, BINS, placement.id)) {
+      return false;
+    }
+  }
+  return true;
 };
 
 const normalizePlacement = (
@@ -375,12 +404,13 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
       status = 'autofit';
     }
 
+    const placementId = crypto.randomUUID ? crypto.randomUUID() : `placement-${Date.now()}-${Math.random()}`;
     pushState({
       ...state,
       placements: [
         ...state.placements,
         {
-          id: crypto.randomUUID ? crypto.randomUUID() : `placement-${Date.now()}-${Math.random()}`,
+          id: placementId,
           binId,
           x: target.x,
           y: target.y,
@@ -390,7 +420,7 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
         }
       ]
     });
-    return { status, position: target };
+    return { status, position: target, placementId };
   };
 
   const movePlacement = (placementId: string, x: number, y: number): PlacementResult => {
@@ -459,8 +489,9 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
         return null;
       }
 
+      const sizeChangeRequested = updates.width != null || updates.length != null;
       result = { status: 'placed', position: { x: placement.x, y: placement.y } };
-      return {
+      const candidateState = {
         ...state,
         placements: state.placements.map((p) =>
           p.id === placementId
@@ -476,6 +507,16 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
             : p
         )
       };
+
+      if (
+        sizeChangeRequested &&
+        !isLayoutValid(candidateState.placements, state.drawerWidth, state.drawerLength, new Set([placementId]))
+      ) {
+        result = { status: 'blocked' };
+        return null;
+      }
+
+      return candidateState;
     })();
 
     if (next) pushState(next);
@@ -494,6 +535,7 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
       const targetPlacements = state.placements.filter((placement) => targetSet.has(placement.id));
       if (targetPlacements.length === 0) return null;
       const nextColor = updates.color ? normalizeHexColor(updates.color) : undefined;
+      const sizeChangeRequested = updates.width != null || updates.length != null;
 
       const nextById = new Map<string, Placement>();
       for (const placement of targetPlacements) {
@@ -520,10 +562,19 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
         position: { x: targetPlacements[0].x, y: targetPlacements[0].y }
       };
 
-      return {
+      const candidateState = {
         ...state,
         placements: state.placements.map((placement) => nextById.get(placement.id) ?? placement)
       };
+
+      if (
+        sizeChangeRequested &&
+        !isLayoutValid(candidateState.placements, state.drawerWidth, state.drawerLength, new Set(ids))
+      ) {
+        return null;
+      }
+
+      return candidateState;
     })();
 
     if (next) pushState(next);
@@ -607,6 +658,15 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
+  const removePlacements = (placementIds: string[]) => {
+    const ids = new Set(placementIds);
+    if (ids.size === 0) return;
+    pushState({
+      ...state,
+      placements: state.placements.filter((p) => !ids.has(p.id))
+    });
+  };
+
   const clearPlacements = () => {
     if (state.placements.length === 0) return;
     pushState({
@@ -629,6 +689,7 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
     const normalizedSize = normalizeDrawerSize(width, length);
     if (!normalizedSize) return;
     if (normalizedSize.width === state.drawerWidth && normalizedSize.length === state.drawerLength) return;
+    if (!isLayoutValid(state.placements, normalizedSize.width, normalizedSize.length)) return;
     pushState({ ...state, drawerWidth: normalizedSize.width, drawerLength: normalizedSize.length });
   };
 
@@ -672,6 +733,20 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
   // Keyboard shortcuts: Ctrl/Cmd+Z / Shift+Ctrl/Cmd+Z
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      const target = e.target;
+      if (target instanceof HTMLElement) {
+        const tagName = target.tagName;
+        const role = target.getAttribute('role');
+        if (
+          tagName === 'INPUT' ||
+          tagName === 'TEXTAREA' ||
+          tagName === 'SELECT' ||
+          target.isContentEditable ||
+          role === 'textbox'
+        ) {
+          return;
+        }
+      }
       const meta = e.metaKey || e.ctrlKey;
       if (!meta || e.key.toLowerCase() !== 'z') return;
       e.preventDefault();
@@ -727,6 +802,7 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
     updatePlacement,
     updatePlacements,
     removePlacement,
+    removePlacements,
     clearPlacements,
     activePlacementEditor,
     openPlacementEditor,

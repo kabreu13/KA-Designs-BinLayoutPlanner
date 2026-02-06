@@ -46,6 +46,13 @@ function renderCanvas({ includeSummary = false }: { includeSummary?: boolean } =
   );
 }
 
+const dismissHowTo = () => {
+  const hideButton = screen.queryByText('Hide');
+  if (hideButton) {
+    fireEvent.click(hideButton);
+  }
+};
+
 describe('Canvas', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -61,6 +68,7 @@ describe('Canvas', () => {
 
   it('paint mode recolors bins and can be toggled off', () => {
     renderCanvas();
+    dismissHowTo();
     fireEvent.click(screen.getByText('add-2x2'));
     fireEvent.click(screen.getByTestId('paint-mode-toggle'));
     fireEvent.change(screen.getByTestId('paint-color-select'), { target: { value: '#dc2626' } });
@@ -77,6 +85,7 @@ describe('Canvas', () => {
 
   it('clear layout button removes all placements', () => {
     renderCanvas();
+    dismissHowTo();
     fireEvent.click(screen.getByText('add-2x2'));
     fireEvent.click(screen.getByText('add-4x2'));
     expect(screen.getByTestId('placement-count').textContent).toBe('2');
@@ -87,6 +96,7 @@ describe('Canvas', () => {
 
   it('exits paint mode when clicking empty canvas space', () => {
     renderCanvas();
+    dismissHowTo();
     fireEvent.click(screen.getByText('add-2x2'));
     fireEvent.click(screen.getByTestId('paint-mode-toggle'));
     expect(screen.getByTestId('paint-color-select')).toBeTruthy();
@@ -100,6 +110,7 @@ describe('Canvas', () => {
 
   it('exits paint mode when clicking any non-bin area', () => {
     renderCanvas();
+    dismissHowTo();
     fireEvent.click(screen.getByText('add-2x2'));
     fireEvent.click(screen.getByTestId('paint-mode-toggle'));
     expect(screen.getByTestId('paint-color-select')).toBeTruthy();

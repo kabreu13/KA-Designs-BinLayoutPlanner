@@ -92,6 +92,6 @@ describe('SummaryPanel', () => {
     fireEvent.click(screen.getByText('seed-summary'));
     expect(screen.getAllByTestId('placed-item-group')).toHaveLength(1);
     expect(screen.getByText('Color: White · Amount: 2')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Delete bin' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Delete\s+\d+\s+bins?/i })).toBeTruthy();
   });
 });

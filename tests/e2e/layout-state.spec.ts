@@ -1,5 +1,6 @@
 import './coverage';
 import { test, expect, type Page } from '@playwright/test';
+import { ensureCatalogExpanded } from './helpers';
 
 const BIN_CARD = '[data-testid="bin-card"]';
 const PLACED = '[data-testid="placed-bin"]';
@@ -7,7 +8,7 @@ const acceptShareLayoutDialog = (page: Page) => {
   page.once('dialog', (dialog) => dialog.accept());
 };
 const openFirstCatalogGroup = async (page: Page) => {
-  await page.locator('[data-testid^="catalog-group-toggle-"]').first().click();
+  await ensureCatalogExpanded(page);
 };
 
 test('@smoke loads state from localStorage on refresh', async ({ page }) => {

@@ -1,5 +1,6 @@
 import './coverage';
 import { test, expect } from '@playwright/test';
+import { dismissHowTo } from './helpers';
 
 const getTransformState = async (page: import('@playwright/test').Page) =>
   page.evaluate(() => {
@@ -23,6 +24,7 @@ test('header keeps only branding and title input', async ({ page }) => {
 
 test('@smoke canvas can pan by drag at 1x and zoomed', async ({ page }) => {
   await page.goto('/');
+  await dismissHowTo(page);
 
   const container = page.getByTestId('canvas-scroll-container');
   await expect(container).toBeVisible();
@@ -73,6 +75,7 @@ test('@smoke canvas can pan by drag at 1x and zoomed', async ({ page }) => {
 
 test('home canvas recenters view', async ({ page }) => {
   await page.goto('/');
+  await dismissHowTo(page);
 
   const container = page.getByTestId('canvas-scroll-container');
   await expect(container).toBeVisible();
@@ -113,6 +116,7 @@ test('home canvas recenters view', async ({ page }) => {
 
 test('wheel zoom updates zoom level around cursor', async ({ page }) => {
   await page.goto('/');
+  await dismissHowTo(page);
 
   const container = page.getByTestId('canvas-scroll-container');
   await expect(container).toBeVisible();

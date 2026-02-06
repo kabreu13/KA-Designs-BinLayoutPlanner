@@ -688,7 +688,7 @@ describe('LayoutProvider', () => {
     expect(placements[0]?.length).toBe(4);
   });
 
-  it('updatePlacement allows out-of-bounds sizes up to 8', () => {
+  it('updatePlacement blocks out-of-bounds sizes even within the allowed range', () => {
     render(
       <LayoutProvider>
         <Harness />
@@ -698,7 +698,7 @@ describe('LayoutProvider', () => {
     fireEvent.click(screen.getByText('add'));
     fireEvent.click(screen.getByText('resize-first-width-8'));
     const placements = JSON.parse(screen.getByTestId('placements').textContent ?? '[]') as { width?: number }[];
-    expect(placements[0]?.width).toBe(8);
+    expect(placements[0]?.width).toBe(2);
   });
 
   it('updatePlacement blocks sizes outside the allowed range', () => {

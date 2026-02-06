@@ -46,7 +46,7 @@ test('placed bin editor updates label, color, and size', async ({ page }) => {
   }).toEqual([4, 4]);
 });
 
-test('resize allows out-of-bounds bins with red border', async ({ page }) => {
+test('resize blocks out-of-bounds bins and shows a toast', async ({ page }) => {
   await page.goto('/');
   await ensureCatalogExpanded(page);
   await dismissHowToIfVisible(page);
@@ -68,12 +68,12 @@ test('resize allows out-of-bounds bins with red border', async ({ page }) => {
       return raw ? (JSON.parse(raw).placements ?? []) : [];
     });
     return placements[0]?.width;
-  }).toBe(6);
+  }).toBe(4);
 
-  await expect(placed).toHaveCSS('border-color', 'rgb(153, 27, 27)');
+  await expect(page.getByText('Cannot resize — would overlap or exceed drawer.')).toBeVisible();
 });
 
-test('resize allows overlapping bins with red borders', async ({ page }) => {
+test('resize blocks overlapping bins and shows a toast', async ({ page }) => {
   const layout = {
     drawerWidth: 8,
     drawerLength: 4,
@@ -105,8 +105,7 @@ test('resize allows overlapping bins with red borders', async ({ page }) => {
     });
     const resized = placements.find((p: { id: string }) => p.id === 'p1');
     return resized?.width;
-  }).toBe(6);
+  }).toBe(4);
 
-  await expect(placed.first()).toHaveCSS('border-color', 'rgb(153, 27, 27)');
-  await expect(placed.nth(1)).toHaveCSS('border-color', 'rgb(153, 27, 27)');
+  await expect(page.getByText('Cannot resize — would overlap or exceed drawer.')).toBeVisible();
 });

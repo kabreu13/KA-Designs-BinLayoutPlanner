@@ -27,7 +27,7 @@ test('suggest layout resolves overlapping placements', async ({ page }) => {
   const initialUnique = new Set(initialPlacements.map((p: { x: number; y: number }) => `${p.x},${p.y}`));
   expect(initialUnique.size).toBe(1);
 
-  const suggestButton = page.getByRole('button', { name: 'Suggest Layout' });
+  const suggestButton = page.getByTestId('suggest-layout-button');
   await expect(suggestButton).toBeEnabled();
   await suggestButton.click({ force: true });
 
