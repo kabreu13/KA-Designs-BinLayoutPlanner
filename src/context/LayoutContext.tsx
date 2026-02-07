@@ -544,6 +544,7 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
         const nextWidth = updates.width ?? currentSize.width;
         const nextLength = updates.length ?? currentSize.length;
         if (nextWidth < 2 || nextLength < 2 || nextWidth > 8 || nextLength > 8) {
+          result = { status: 'blocked' };
           return null;
         }
         nextById.set(placement.id, {
@@ -571,6 +572,7 @@ export function LayoutProvider({ children }: { children: React.ReactNode }) {
         sizeChangeRequested &&
         !isLayoutValid(candidateState.placements, state.drawerWidth, state.drawerLength, new Set(ids))
       ) {
+        result = { status: 'blocked' };
         return null;
       }
 

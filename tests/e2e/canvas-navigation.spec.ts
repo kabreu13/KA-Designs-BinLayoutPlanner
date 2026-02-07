@@ -13,13 +13,14 @@ const getTransformState = async (page: import('@playwright/test').Page) =>
     };
   });
 
-test('header keeps only branding and title input', async ({ page }) => {
+test('header keeps branding, title input, and how-to trigger', async ({ page }) => {
   await page.goto('/');
 
   const header = page.locator('header').first();
   await expect(header.getByRole('button', { name: 'Export PDF' })).toHaveCount(0);
   await expect(header.getByTitle('Profile')).toHaveCount(0);
   await expect(header.locator('input[aria-label="Layout title"]:visible')).toHaveCount(1);
+  await expect(header.getByTestId('header-how-to-button')).toBeVisible();
 });
 
 test('@smoke canvas can pan by drag at 1x and zoomed', async ({ page }) => {

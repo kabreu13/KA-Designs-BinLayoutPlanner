@@ -70,7 +70,7 @@ test('keyboard shortcuts ignore layout title input', async ({ page }) => {
   await binCard.click();
   await expect(page.locator(PLACED)).toHaveCount(1);
 
-  const titleInput = page.getByLabel('Layout title');
+  const titleInput = page.getByTestId('layout-title-input');
   await titleInput.click();
   await page.keyboard.type('Test Layout');
   await page.keyboard.press('Control+Z');

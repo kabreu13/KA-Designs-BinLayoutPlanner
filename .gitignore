@@ -33,3 +33,6 @@ vite-env.d.ts
 
 .vercel
 .env*.local
+audits
+scripts
+output

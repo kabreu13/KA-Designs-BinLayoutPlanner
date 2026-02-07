@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { DndContext, PointerSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core';
-import { ChevronDown, ChevronLeft, ChevronRight, Package2, PanelRight } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, House, Package2, PanelRight } from 'lucide-react';
 import { BinCatalog } from '../components/BinCatalog';
 import { Canvas } from '../components/Canvas';
 import { SummaryPanel } from '../components/SummaryPanel';
@@ -23,11 +23,26 @@ export function Workspace() {
   const [isMobileLayout, setIsMobileLayout] = useState<boolean>(() =>
     typeof window !== 'undefined' ? window.matchMedia('(max-width: 767px)').matches : false
   );
+  const [isLandscape, setIsLandscape] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(orientation: landscape)').matches : false
+  );
   const [mobileTab, setMobileTab] = useState<MobileTab>('catalog');
   const [isMobilePanelOpen, setIsMobilePanelOpen] = useState(false);
   const [layoutResizeKey, setLayoutResizeKey] = useState(0);
   const [mobileBottomInsetPx, setMobileBottomInsetPx] = useState(100);
   const mobilePanelRef = useRef<HTMLDivElement | null>(null);
+  const handleSkipToActions = useCallback((event: React.MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault();
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new Event('quick-actions-focus'));
+    const target = document.querySelector('[data-quick-actions-start]') as HTMLElement | null;
+    if (target) {
+      target.focus();
+      return;
+    }
+    const fallback = document.querySelector('[data-testid="quick-actions-toggle"]') as HTMLElement | null;
+    fallback?.focus();
+  }, []);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } })
   );
@@ -46,6 +61,15 @@ export function Workspace() {
     syncLayout();
     media.addEventListener('change', syncLayout);
     return () => media.removeEventListener('change', syncLayout);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const media = window.matchMedia('(orientation: landscape)');
+    const syncOrientation = () => setIsLandscape(media.matches);
+    syncOrientation();
+    media.addEventListener('change', syncOrientation);
+    return () => media.removeEventListener('change', syncOrientation);
   }, []);
 
   useEffect(() => {
@@ -89,6 +113,8 @@ export function Workspace() {
     setIsMobilePanelOpen(true);
   };
 
+  const mobilePanelMaxHeight = isLandscape ? '44vh' : '52vh';
+
   return (
     <DndContext
       sensors={sensors}
@@ -103,6 +129,19 @@ export function Workspace() {
       onDragEnd={() => setActiveBinId(null)}
       onDragCancel={() => setActiveBinId(null)}
     >
+      <a
+        href="#canvas-drop-zone"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[70] focus:rounded-full focus:bg-white focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-[#14476B] focus:shadow-md"
+      >
+        Skip to canvas
+      </a>
+      <a
+        href="#quick-actions"
+        onClick={handleSkipToActions}
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-16 focus:z-[70] focus:rounded-full focus:bg-white focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-[#14476B] focus:shadow-md"
+      >
+        Skip to quick actions
+      </a>
       <div className="h-[calc(100vh-65px)] supports-[height:100dvh]:h-[calc(100dvh-65px)]">
         {isMobileLayout ? (
           <div className="relative h-full min-h-0 overflow-hidden bg-[#F6F7F8]">
@@ -113,7 +152,7 @@ export function Workspace() {
             />
             <div
               ref={mobilePanelRef}
-              className="absolute inset-x-0 bottom-0 z-40 px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]"
+              className="absolute inset-x-0 bottom-0 z-[65] px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]"
             >
               <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white/95 backdrop-blur shadow-lg">
                 <div role="tablist" aria-label="Mobile panels" className="grid grid-cols-[1fr_1fr_auto] items-center gap-1 p-1.5">
@@ -163,15 +202,16 @@ export function Workspace() {
                     aria-expanded={isMobilePanelOpen}
                     aria-controls="mobile-panel-content"
                     onClick={() => setIsMobilePanelOpen((open) => !open)}
-                    className="h-11 w-11 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-100 flex items-center justify-center"
+                    className="h-11 px-3 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-100 flex items-center justify-center gap-2 text-sm font-medium"
                   >
+                    <House className="h-4 w-4" />
+                    Canvas
                     <ChevronDown className={`h-4 w-4 transition-transform ${isMobilePanelOpen ? 'rotate-180' : ''}`} />
                   </button>
                 </div>
                 <div
-                  className={`transition-[max-height] duration-200 ease-out overflow-hidden ${
-                    isMobilePanelOpen ? 'max-h-[52vh]' : 'max-h-0'
-                  }`}
+                  className="transition-[max-height] duration-200 ease-out overflow-hidden"
+                  style={{ maxHeight: isMobilePanelOpen ? mobilePanelMaxHeight : '0px' }}
                 >
                   <div
                     id="mobile-panel-content"
@@ -179,7 +219,8 @@ export function Workspace() {
                     aria-labelledby={mobileTab === 'catalog' ? 'mobile-tab-catalog' : 'mobile-tab-summary'}
                     aria-hidden={!isMobilePanelOpen}
                     tabIndex={isMobilePanelOpen ? 0 : -1}
-                    className="h-[52vh] border-t border-slate-200"
+                    className="border-t border-slate-200"
+                    style={{ height: mobilePanelMaxHeight }}
                   >
                     {mobileTab === 'catalog' ? <BinCatalog mobile /> : <SummaryPanel mobile />}
                   </div>

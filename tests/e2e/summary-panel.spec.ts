@@ -8,8 +8,12 @@ const PLACED = '[data-testid="placed-bin"]';
 test('drawer size inputs update canvas labels', async ({ page }) => {
   await page.goto('/');
 
-  await page.getByTestId('drawer-width-input').fill('30');
-  await page.getByTestId('drawer-length-input').fill('20');
+  const widthInput = page.getByTestId('drawer-width-input');
+  await widthInput.fill('30');
+  await widthInput.blur();
+  const lengthInput = page.getByTestId('drawer-length-input');
+  await lengthInput.fill('20');
+  await lengthInput.blur();
 
   await expect(page.getByText('30" Width')).toBeVisible();
   await expect(page.getByText('20" Length')).toBeVisible();
@@ -92,15 +96,12 @@ test('remove bin from summary updates placements', async ({ page }) => {
   const before = await getStoredPlacements(page);
   expect(before.length).toBe(2);
 
-  const removeButton = page
-    .locator('[data-testid="placed-item-group"]')
-    .first()
-    .getByRole('button', { name: /Delete\s+\d+\s+bins?/i });
+  const removeButton = page.getByTestId('placed-item-delete-button').first();
   await removeButton.click({ force: true });
 
-  await expectStoredPlacementsCount(page, 1);
+  await expectStoredPlacementsCount(page, 0);
   const after = await getStoredPlacements(page);
-  expect(after.length).toBe(1);
+  expect(after.length).toBe(0);
 });
 
 test('export PDF downloads a file', async ({ page }) => {
@@ -127,7 +128,8 @@ test('drawer resize warns when bins would be clipped', async ({ page }) => {
   await page.goto('/');
   const widthInput = page.getByTestId('drawer-width-input');
   await widthInput.fill('20');
+  await widthInput.blur();
 
-  await expect(page.getByText('Resize would clip bins. Move or remove bins first.')).toBeVisible();
+  await expect(page.getByRole('alert').filter({ hasText: 'Resize would clip bins. Move or remove bins first.' }).first()).toBeVisible();
   await expect(widthInput).toHaveValue('24');
 });

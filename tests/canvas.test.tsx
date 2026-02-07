@@ -1,10 +1,11 @@
 /* @vitest-environment jsdom */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { DndContext } from '@dnd-kit/core';
 import { LayoutProvider, useLayout } from '../src/context/LayoutContext';
 import { Canvas } from '../src/components/Canvas';
 import { SummaryPanel } from '../src/components/SummaryPanel';
+import { OPEN_HOW_TO_EVENT } from '../src/lib/uiEvents';
 
 if (!('ResizeObserver' in globalThis)) {
   class ResizeObserverMock {
@@ -47,9 +48,9 @@ function renderCanvas({ includeSummary = false }: { includeSummary?: boolean } =
 }
 
 const dismissHowTo = () => {
-  const hideButton = screen.queryByText('Hide');
-  if (hideButton) {
-    fireEvent.click(hideButton);
+  const closeButton = screen.queryByRole('button', { name: 'Close how to' });
+  if (closeButton) {
+    fireEvent.click(closeButton);
   }
 };
 
@@ -59,11 +60,11 @@ describe('Canvas', () => {
     history.replaceState({}, '', '/');
   });
 
-  it('shows default color text under the size label', () => {
+  it('exposes default color in placed bin accessible label', () => {
     renderCanvas();
     fireEvent.click(screen.getByText('add-2x2'));
     const placedBin = screen.getByTestId('placed-bin');
-    expect(within(placedBin).getByText('White')).toBeTruthy();
+    expect(placedBin.getAttribute('aria-label')).toContain('White');
   });
 
   it('paint mode recolors bins and can be toggled off', () => {
@@ -155,23 +156,23 @@ describe('Canvas', () => {
     expect(screen.getByTestId('placement-count').textContent).toBe('0');
   });
 
-  it('shows a how-to block and starts the guided tour', () => {
+  it('opens how-to modal from header trigger and starts the guided tour', () => {
     renderCanvas();
-    expect(screen.getByTestId('canvas-how-to')).toBeTruthy();
+    fireEvent(window, new Event(OPEN_HOW_TO_EVENT));
+    expect(screen.getByTestId('how-to-modal')).toBeTruthy();
+    expect(screen.getByText(/Export PDF or Copy Share Link/i)).toBeTruthy();
+    expect(screen.getByText(/Open Etsy Cart/i)).toBeTruthy();
     fireEvent.click(screen.getByText('Take Tour'));
-    expect(screen.queryByTestId('canvas-how-to')).toBeNull();
+    expect(screen.queryByTestId('how-to-modal')).toBeNull();
     expect(screen.getByTestId('tour-popover')).toBeTruthy();
     expect(screen.getByText('1. Pick A Bin')).toBeTruthy();
   });
 
-  it('collapses the how-to box when Hide is clicked', () => {
+  it('closes the how-to modal from the close icon', () => {
     renderCanvas();
-    expect(screen.getByTestId('canvas-how-to')).toBeTruthy();
-    fireEvent.click(screen.getByText('Hide'));
-    expect(screen.queryByTestId('canvas-how-to')).toBeNull();
-    expect(screen.getByTestId('canvas-how-to-collapsed')).toBeTruthy();
-
-    fireEvent.click(screen.getByText('Show'));
-    expect(screen.getByTestId('canvas-how-to')).toBeTruthy();
+    fireEvent(window, new Event(OPEN_HOW_TO_EVENT));
+    expect(screen.getByTestId('how-to-modal')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Close how to' }));
+    expect(screen.queryByTestId('how-to-modal')).toBeNull();
   });
 });

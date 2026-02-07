@@ -5,8 +5,12 @@ import { clickBinBySize, ensureCatalogExpanded } from './helpers';
 const PLACED = '[data-testid="placed-bin"]';
 
 const setDrawerSize = async (page: import('@playwright/test').Page, width: number, length: number) => {
-  await page.getByTestId('drawer-width-input').fill(String(width));
-  await page.getByTestId('drawer-length-input').fill(String(length));
+  const widthInput = page.getByTestId('drawer-width-input');
+  await widthInput.fill(String(width));
+  await widthInput.blur();
+  const lengthInput = page.getByTestId('drawer-length-input');
+  await lengthInput.fill(String(length));
+  await lengthInput.blur();
 };
 
 const dragPlacedBinOntoAnother = async (page: import('@playwright/test').Page, sourceIndex: number, targetIndex: number) => {

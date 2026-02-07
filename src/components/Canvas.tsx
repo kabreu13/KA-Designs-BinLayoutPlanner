@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   HTMLAttributes,
   MouseEvent as ReactMouseEvent,
@@ -8,14 +8,18 @@ import { useDndMonitor, useDroppable, useDraggable } from '@dnd-kit/core';
 import { TransformComponent, TransformWrapper } from 'react-zoom-pan-pinch';
 import type { ReactZoomPanPinchContentRef, ReactZoomPanPinchRef } from 'react-zoom-pan-pinch';
 import { Button } from './ui/Button';
-import { Grid, Sparkles, RotateCcw, RotateCw, PaintBucket, Trash2, ChevronDown, ChevronUp, ZoomIn, ZoomOut, House, GripHorizontal } from 'lucide-react';
+import { AlertCircle, X } from 'lucide-react';
 import { useLayout } from '../context/LayoutContext';
 import { applyDelta, type DragItem, type Point } from '../utils/dragMath';
 import type { Bin, Placement } from '../context/LayoutContext';
+import { OPEN_HOW_TO_EVENT } from '../lib/uiEvents';
+import { DesktopQuickActions } from './canvas/desktop/QuickActions';
+import { MobileQuickActions } from './canvas/mobile/QuickActions';
+import { useCanvasController } from './canvas/hooks/useCanvasController';
+import { PlacementEditor } from './canvas/shared/PlacementEditor';
 import {
   CUSTOM_COLOR_VALUE,
   DEFAULT_BIN_COLOR,
-  PRESET_COLORS,
   getColorLabel,
   getColorSelection,
   getContrastText,
@@ -24,28 +28,24 @@ import {
 
 const GRID_SIZE = 25; // px per inch on canvas
 const FRAME_THROTTLE_MS = 16; // ~60fps
-const SIZE_STEP = 2;
-const MIN_BIN_SIZE = 2;
-const MAX_BIN_SIZE = 8;
 const DEFAULT_SNAP = 1;
 const SNAP_MIN = 0.5;
 const SNAP_MAX = 2;
 const CANVAS_PADDING = 32; // px padding between canvas edge and drawer area
 const LABEL_ZONE = CANVAS_PADDING / 2; // center labels within the padding zone
-const EDITOR_WIDTH_PX = 240;
-const EDITOR_HEIGHT_PX = 320;
-const EDITOR_OFFSET_PX = 12;
 const VIEWPORT_PADDING_PX = 8;
 const MIN_CANVAS_ZOOM = 0.5;
 const MAX_CANVAS_ZOOM = 2.5;
+const CANVAS_ALERT_EVENT = 'canvas-alert';
 const ZOOM_DECIMALS = 4;
-const ZOOM_BUTTON_ANIMATION_MS = 140;
-const ZOOM_FIT_ANIMATION_MS = 180;
+// NOTE: react-zoom-pan-pinch 3.7.0 can throw in internal animation RAF paths
+// in some environments. Keep transforms immediate until the dependency is upgraded.
+const ZOOM_BUTTON_ANIMATION_MS = 0;
+const ZOOM_FIT_ANIMATION_MS = 0;
 const WHEEL_ZOOM_SENSITIVITY = 0.00125;
 const DESKTOP_CANVAS_STAGE_GUTTER_PX = 72;
 const MOBILE_CANVAS_STAGE_GUTTER_PX = 48;
-const ACTIONS_DRAG_MARGIN_PX = 12;
-const HOW_TO_STORAGE_KEY = 'bin-layout-howto-hidden';
+const MOBILE_PANEL_CLEARANCE_PX = 96;
 const TRANSFORM_WRAPPER_TEST_PROPS = { 'data-testid': 'canvas-transform-wrapper' } as HTMLAttributes<HTMLDivElement>;
 const TRANSFORM_CONTENT_TEST_PROPS = { 'data-testid': 'canvas-transform-content' } as HTMLAttributes<HTMLDivElement>;
 
@@ -73,7 +73,7 @@ const DESKTOP_TOUR_STEPS = [
   {
     selector: '[data-testid="side-panel-right"]',
     title: '5. Review Summary',
-    description: 'Use the right panel for drawer settings, placed item groups, exports, and quick edits.'
+    description: 'Use the right panel for drawer settings, placed item groups, export/share actions, and Etsy cart.'
   }
 ] as const;
 
@@ -96,7 +96,7 @@ const MOBILE_TOUR_STEPS = [
   {
     selector: '[data-testid="mobile-tab-summary"]',
     title: '4. Review Summary',
-    description: 'Use the Summary tab for drawer settings, item groups, exports, and quick edits.'
+    description: 'Use the Summary tab for drawer settings, item groups, export/share actions, and Etsy cart.'
   }
 ] as const;
 
@@ -125,6 +125,7 @@ export function Canvas({
     removePlacements,
     clearPlacements,
     activePlacementEditor,
+    openPlacementEditor,
     closePlacementEditor,
     undo,
     redo,
@@ -145,6 +146,8 @@ export function Canvas({
   const [snapHelper, setSnapHelper] = useState<string | null>(null);
   const [suggestMode, setSuggestMode] = useState<'pack' | 'random'>('pack');
   const [toast, setToast] = useState<{ type: 'info' | 'error'; message: string } | null>(null);
+  const [canvasAlert, setCanvasAlert] = useState<{ type: 'info' | 'error'; message: string } | null>(null);
+  const [suggestStatus, setSuggestStatus] = useState<'packing' | 'randomizing' | null>(null);
   const [binGhost, setBinGhost] = useState<{
     x: number;
     y: number;
@@ -154,38 +157,33 @@ export function Canvas({
     outOfBounds: boolean;
   } | null>(null);
   const [dragStatus, setDragStatus] = useState<{ placementId: string; fits: boolean } | null>(null);
-  const [editor, setEditor] = useState<{ placementIds: string[]; x: number; y: number } | null>(null);
-  const [labelDraft, setLabelDraft] = useState('');
-  const [colorDraft, setColorDraft] = useState(DEFAULT_BIN_COLOR);
-  const [colorSelection, setColorSelection] = useState<string>(DEFAULT_BIN_COLOR);
   const [paintMode, setPaintMode] = useState(false);
   const [paintColorDraft, setPaintColorDraft] = useState(DEFAULT_BIN_COLOR);
   const [paintColorSelection, setPaintColorSelection] = useState<string>(DEFAULT_BIN_COLOR);
   const [canvasZoom, setCanvasZoom] = useState(1);
   const [canvasPosition, setCanvasPosition] = useState<Point>({ x: 0, y: 0 });
+  const [homeZoom, setHomeZoom] = useState(1);
   const [highlight, setHighlight] = useState<{ id: string; type: 'info' | 'error' } | null>(null);
-  const [quickActionsOpen, setQuickActionsOpen] = useState(() => !isMobileLayout);
+  const [quickActionsOpen, setQuickActionsOpen] = useState(true);
   const [quickActionsMode, setQuickActionsMode] = useState<'mini' | 'full'>(() =>
     isMobileLayout ? 'mini' : 'full'
   );
+  const [quickActionsTabbable, setQuickActionsTabbable] = useState(isMobileLayout);
   const [isPanningCanvas, setIsPanningCanvas] = useState(false);
-  const [zoomLockActive, setZoomLockActive] = useState(false);
-  const [actionsOffset, setActionsOffset] = useState<Point>({ x: 0, y: 0 });
-  const [isDraggingActions, setIsDraggingActions] = useState(false);
-  const [showHowTo, setShowHowTo] = useState(() => {
-    if (typeof window === 'undefined') return true;
-    return localStorage.getItem(HOW_TO_STORAGE_KEY) !== 'true';
-  });
+  const [howToModalOpen, setHowToModalOpen] = useState(false);
   const [tourActive, setTourActive] = useState(false);
-  const disableQuickActions = showHowTo && !tourActive;
+  const disableQuickActions = tourActive;
   const hasPlacements = placements.length > 0;
   const isQuickActionsMini = isMobileLayout && quickActionsMode === 'mini';
+  const quickActionsTabIndex = !isMobileLayout && !quickActionsTabbable ? -1 : 0;
   const [tourStepIndex, setTourStepIndex] = useState(0);
   const [tourTargetRect, setTourTargetRect] = useState<DOMRect | null>(null);
+  const mobileBottomSafeInsetPx = isMobileLayout
+    ? Math.max(mobileBottomInsetPx, MOBILE_PANEL_CLEARANCE_PX)
+    : mobileBottomInsetPx;
   const canvasViewportRef = useRef<HTMLDivElement | null>(null);
   const transformRef = useRef<ReactZoomPanPinchContentRef | null>(null);
   const dropAreaRef = useRef<HTMLDivElement | null>(null);
-  const editorRef = useRef<HTMLDivElement | null>(null);
   const lastFrameRef = useRef<number>(0);
   const activeDragRef = useRef<DragItem | null>(null);
   const pointerOriginRef = useRef<Point | null>(null);
@@ -194,45 +192,57 @@ export function Canvas({
   const canvasZoomRef = useRef(canvasZoom);
   const canvasPositionRef = useRef<Point>({ x: 0, y: 0 });
   const panStateRef = useRef<{ pointerId: number; x: number; y: number; originX: number; originY: number } | null>(null);
-  const actionsDragRef = useRef<{
-    startX: number;
-    startY: number;
-    originX: number;
-    originY: number;
-    rect: DOMRect | null;
-  } | null>(null);
-  const actionsHandleRef = useRef<HTMLButtonElement | null>(null);
-  const actionsDragElementRef = useRef<HTMLElement | null>(null);
-  const actionsClickBlockedRef = useRef(false);
   const suppressClickUntilRef = useRef(0);
-  const lastFocusRef = useRef<HTMLElement | null>(null);
-  const labelInputRef = useRef<HTMLInputElement | null>(null);
   const snapInputRef = useRef<HTMLInputElement | null>(null);
   const highlightTimeoutRef = useRef<number | null>(null);
   const previousLayoutModeRef = useRef(isMobileLayout);
   const wheelZoomRafRef = useRef<number | null>(null);
   const wheelZoomDeltaRef = useRef(0);
   const wheelZoomPointerRef = useRef<Point | undefined>(undefined);
-  const drawerZoomResetTimeoutRef = useRef<number | null>(null);
-  const drawerZoomResetLateTimeoutRef = useRef<number | null>(null);
-  const drawerZoomResetIntervalRef = useRef<number | null>(null);
-  const drawerZoomResetIntervalStopRef = useRef<number | null>(null);
-  const zoomLockTimeoutRef = useRef<number | null>(null);
-  const zoomHintShownRef = useRef(false);
-  const hasInitializedRef = useRef(false);
-  const drawerSizeRef = useRef<{ width: number; length: number; initialized: boolean }>({
-    width: drawerWidth,
-    length: drawerLength,
-    initialized: false
-  });
-  const autoFitSuppressedUntilRef = useRef<number>(0);
-  const forceZoomResetUntilRef = useRef<number>(0);
+  const undoHintShownRef = useRef(false);
+  const undoHintPendingRef = useRef(false);
 
   useEffect(() => {
     if (!toast) return;
     const id = window.setTimeout(() => setToast(null), 2500);
     return () => window.clearTimeout(id);
   }, [toast]);
+
+  useEffect(() => {
+    if (canUndo && !undoHintShownRef.current) {
+      if (!toast) {
+        setToast({ type: 'info', message: 'Undo available (Ctrl/Cmd+Z).' });
+        undoHintShownRef.current = true;
+      } else {
+        undoHintPendingRef.current = true;
+      }
+    }
+  }, [canUndo, toast]);
+
+  useEffect(() => {
+    if (!toast && undoHintPendingRef.current && !undoHintShownRef.current) {
+      setToast({ type: 'info', message: 'Undo available (Ctrl/Cmd+Z).' });
+      undoHintShownRef.current = true;
+      undoHintPendingRef.current = false;
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    if (!canvasAlert) return;
+    const id = window.setTimeout(() => setCanvasAlert(null), 2200);
+    return () => window.clearTimeout(id);
+  }, [canvasAlert]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ type: 'info' | 'error'; message: string }>).detail;
+      if (!detail?.message) return;
+      setCanvasAlert(detail);
+    };
+    window.addEventListener(CANVAS_ALERT_EVENT, handler as EventListener);
+    return () => window.removeEventListener(CANVAS_ALERT_EVENT, handler as EventListener);
+  }, []);
 
   useEffect(() => {
     if (placements.length === 0) {
@@ -242,7 +252,9 @@ export function Canvas({
   }, [placements.length]);
 
   useEffect(() => {
-    setQuickActionsOpen(!isMobileLayout);
+    if (isMobileLayout) {
+      setQuickActionsOpen(true);
+    }
   }, [isMobileLayout]);
 
   useEffect(() => {
@@ -261,8 +273,35 @@ export function Canvas({
   }, [isMobileLayout, quickActionsOpen]);
 
   useEffect(() => {
-    setActionsOffset({ x: 0, y: 0 });
+    if (isMobileLayout) {
+      setQuickActionsTabbable(true);
+    }
   }, [isMobileLayout]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = () => setQuickActionsTabbable(true);
+    window.addEventListener('quick-actions-focus', handler);
+    return () => window.removeEventListener('quick-actions-focus', handler);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const openHowTo = () => setHowToModalOpen(true);
+    window.addEventListener(OPEN_HOW_TO_EVENT, openHowTo);
+    return () => window.removeEventListener(OPEN_HOW_TO_EVENT, openHowTo);
+  }, []);
+
+  useEffect(() => {
+    if (!howToModalOpen) return;
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setHowToModalOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [howToModalOpen]);
 
   useEffect(() => {
     canvasZoomRef.current = canvasZoom;
@@ -286,7 +325,6 @@ export function Canvas({
 
   const zoomCanvas = useCallback(
     (nextZoom: number, pointer?: Point, animationMs = ZOOM_BUTTON_ANIMATION_MS) => {
-      if (zoomLockActive) return;
       const viewport = canvasViewportRef.current;
       const transform = transformRef.current;
       const previousZoom = canvasZoomRef.current;
@@ -312,7 +350,7 @@ export function Canvas({
       const nextPositionY = anchorY - (anchorY - currentPosition.y) * zoomRatio;
       transform.setTransform(nextPositionX, nextPositionY, targetZoom, animationMs, 'easeOut');
     },
-    [clampZoom, zoomLockActive]
+    [clampZoom]
   );
 
   const getFitZoom = useCallback(() => {
@@ -327,86 +365,20 @@ export function Canvas({
   }, [canvasStageGutterPx, clampZoom, drawerLength, drawerWidth]);
 
   const fitCanvasInView = useCallback(() => {
-    if (performance.now() < autoFitSuppressedUntilRef.current) return;
     const transform = transformRef.current;
     const fitZoom = getFitZoom();
+    if (fitZoom != null) {
+      setHomeZoom(fitZoom);
+    }
     if (!transform || fitZoom == null) return;
     transform.centerView(fitZoom, ZOOM_FIT_ANIMATION_MS, 'easeOut');
   }, [getFitZoom]);
 
-  useEffect(() => {
-    if (!activePlacementEditor) return;
-    if (typeof document !== 'undefined') {
-      lastFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    }
-    setEditor(activePlacementEditor);
-  }, [activePlacementEditor]);
-
-  const closeEditor = useCallback(() => {
-    setEditor(null);
-    closePlacementEditor();
-    const lastFocus = lastFocusRef.current;
-    if (lastFocus && typeof document !== 'undefined' && document.contains(lastFocus)) {
-      window.requestAnimationFrame(() => lastFocus.focus());
-    }
-  }, [closePlacementEditor]);
-
-  useEffect(() => {
-    if (!editor) return;
-    const id = window.requestAnimationFrame(() => {
-      labelInputRef.current?.focus();
-    });
-    return () => window.cancelAnimationFrame(id);
-  }, [editor]);
-
-  const hideHowTo = () => {
-    setShowHowTo(false);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(HOW_TO_STORAGE_KEY, 'true');
-    }
-  };
-
-  const showHowToCard = () => {
-    setShowHowTo(true);
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem(HOW_TO_STORAGE_KEY);
-    }
-  };
-
-  useEffect(() => {
-    if (!editor) return;
-    const placement = placements.find((p) => p.id === editor.placementIds[0]);
-    if (!placement) {
-      closeEditor();
-      return;
-    }
-    setLabelDraft(placement.label ?? '');
-    setColorDraft(normalizeHexColor(placement.color ?? DEFAULT_BIN_COLOR));
-    setColorSelection(getColorSelection(placement.color));
-  }, [closeEditor, editor, placements]);
-
-  useEffect(() => {
-    if (!editor) return;
-    const handlePointer = (event: MouseEvent) => {
-      const target = event.target as Node | null;
-      if (!target) return;
-      if (editorRef.current?.contains(target)) return;
-      closeEditor();
-    };
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') closeEditor();
-    };
-    window.addEventListener('mousedown', handlePointer);
-    window.addEventListener('keydown', handleKey);
-    return () => {
-      window.removeEventListener('mousedown', handlePointer);
-      window.removeEventListener('keydown', handleKey);
-    };
-  }, [closeEditor, editor]);
-
   const handleSuggestLayout = useCallback(() => {
+    setSuggestStatus(suggestMode === 'pack' ? 'packing' : 'randomizing');
     const mode = suggestMode;
     const result = suggestLayout(mode);
+    window.setTimeout(() => setSuggestStatus(null), 700);
     if (result.status === 'blocked') {
       setToast({ type: 'error', message: 'No layout fits all bins in the drawer.' });
       return;
@@ -451,41 +423,46 @@ export function Canvas({
   }, []);
 
   const suggestModeLabel = suggestMode === 'pack' ? 'Pack' : 'Random';
-
-  const handleResize = (axis: 'width' | 'length', direction: -1 | 1) => {
-    if (!selectedSize || selectedPlacementIds.length === 0) return;
-    const current = axis === 'width' ? selectedSize.width : selectedSize.length;
-    const next = Math.max(MIN_BIN_SIZE, Math.min(MAX_BIN_SIZE, current + direction * SIZE_STEP));
-    if (next === current) return;
-    const result = updatePlacements(selectedPlacementIds, { [axis]: next });
-    if (result.status === 'blocked') {
-      setToast({ type: 'error', message: 'Cannot resize — would overlap or exceed drawer.' });
-      if (selectedPlacementIds[0]) {
-        triggerHighlight(selectedPlacementIds[0], 'error');
-      }
-    }
-  };
-
-  const commitLabel = (rawLabel?: string) => {
-    if (selectedPlacementIds.length === 0) return;
-    const nextLabel = (rawLabel ?? labelDraft).trim();
-    updatePlacements(selectedPlacementIds, { label: nextLabel });
-  };
-
-  const handleColorChange = (value: string) => {
-    if (selectedPlacementIds.length === 0) return;
-    const normalizedColor = normalizeHexColor(value);
-    setColorDraft(normalizedColor);
-    setColorSelection(getColorSelection(normalizedColor));
-    updatePlacements(selectedPlacementIds, { color: normalizedColor });
-  };
-
-  const handleColorSelectionChange = (value: string) => {
-    setColorSelection(value);
-    if (value === CUSTOM_COLOR_VALUE || selectedPlacementIds.length === 0) return;
-    setColorDraft(value);
-    updatePlacements(selectedPlacementIds, { color: value });
-  };
+  const layoutControlsDisabled = !hasPlacements;
+  const {
+    getPlacementSize,
+    editor,
+    editorRef,
+    labelInputRef,
+    selectedCount,
+    selectedPlacement,
+    selectedSize,
+    editorPosition,
+    labelDraft,
+    setLabelDraft,
+    colorDraft,
+    colorSelection,
+    resizeError,
+    closeEditor,
+    openEditorForPlacement,
+    commitLabel,
+    handleColorChange,
+    handleColorSelectionChange,
+    handleResize,
+    deleteSelectedPlacements,
+    sizeStep,
+    minBinSize,
+    maxBinSize
+  } = useCanvasController({
+    placements,
+    bins,
+    activePlacementEditor,
+    closePlacementEditor,
+    openPlacementEditor,
+    updatePlacements,
+    removePlacements,
+    triggerHighlight,
+    setToast,
+    isMobileLayout,
+    layoutResizeKey,
+    mobileBottomSafeInsetPx,
+    canvasViewportRef
+  });
 
   const togglePaintMode = () => {
     setPaintMode((active) => {
@@ -539,10 +516,7 @@ export function Canvas({
   }, []);
 
   const startTour = () => {
-    setShowHowTo(false);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(HOW_TO_STORAGE_KEY, 'true');
-    }
+    setHowToModalOpen(false);
     if (isMobileLayout) {
       setQuickActionsOpen(true);
     }
@@ -697,23 +671,6 @@ export function Canvas({
     setSnapHelper(clamped !== numeric ? `Clamped to ${SNAP_MIN}\u2013${SNAP_MAX} in.` : null);
   };
 
-  const setCanvasToScale = useCallback(
-    (scale: number, animationMs = 0) => {
-      const viewport = canvasViewportRef.current;
-      const transform = transformRef.current;
-      if (!viewport || !transform) return;
-      const rect = viewport.getBoundingClientRect();
-      const stageWidth = drawerWidth * GRID_SIZE + CANVAS_PADDING * 2 + canvasStageGutterPx * 2;
-      const stageHeight = drawerLength * GRID_SIZE + CANVAS_PADDING * 2 + canvasStageGutterPx * 2;
-      const targetWidth = stageWidth * scale;
-      const targetHeight = stageHeight * scale;
-      const nextX = (rect.width - targetWidth) / 2;
-      const nextY = (rect.height - targetHeight) / 2;
-      transform.setTransform(nextX, nextY, scale, animationMs, 'easeOut');
-    },
-    [canvasStageGutterPx, drawerLength, drawerWidth]
-  );
-
   const handleCanvasInit = useCallback((ref: ReactZoomPanPinchRef) => {
     transformRef.current = ref;
     const { scale, positionX, positionY } = ref.state;
@@ -721,247 +678,32 @@ export function Canvas({
     canvasPositionRef.current = { x: positionX, y: positionY };
     setCanvasZoom(scale);
     setCanvasPosition({ x: positionX, y: positionY });
-    const shouldFit = !hasInitializedRef.current;
-    hasInitializedRef.current = true;
-    window.requestAnimationFrame(() => {
-      if (shouldFit) {
-        fitCanvasInView();
-      } else {
-        setCanvasToScale(1, 0);
-      }
-    });
-  }, [fitCanvasInView, setCanvasToScale]);
+    window.requestAnimationFrame(() => fitCanvasInView());
+  }, [fitCanvasInView]);
 
   const handleCanvasTransformed = useCallback(
     (_ref: ReactZoomPanPinchRef, state: { scale: number; positionX: number; positionY: number }) => {
-      if (performance.now() < forceZoomResetUntilRef.current && Math.abs(state.scale - 1) > 0.01) {
-        setCanvasToScale(1, 0);
-        canvasZoomRef.current = 1;
-        setCanvasZoom(1);
-        setCanvasPosition({ x: state.positionX, y: state.positionY });
-        return;
-      }
       const nextScale = clampZoom(state.scale);
       canvasZoomRef.current = nextScale;
       canvasPositionRef.current = { x: state.positionX, y: state.positionY };
       setCanvasZoom(nextScale);
       setCanvasPosition({ x: state.positionX, y: state.positionY });
     },
-    [clampZoom, setCanvasToScale]
+    [clampZoom]
   );
 
   useEffect(() => {
-    fitCanvasInView();
-  }, [fitCanvasInView, layoutResizeKey]);
-
-  useLayoutEffect(() => {
-    const previous = drawerSizeRef.current;
-    const drawerChanged = previous.width !== drawerWidth || previous.length !== drawerLength;
-    drawerSizeRef.current = { width: drawerWidth, length: drawerLength, initialized: true };
-
-    const id = window.requestAnimationFrame(() => {
-      if (!previous.initialized) {
-        fitCanvasInView();
-        return;
-      }
-
-      if (drawerChanged) {
-        const transform = transformRef.current;
-        if (!transform) {
-          canvasZoomRef.current = 1;
-          setCanvasZoom(1);
-          return;
-        }
-        autoFitSuppressedUntilRef.current = performance.now() + 2000;
-        forceZoomResetUntilRef.current = performance.now() + 1500;
-        if (drawerZoomResetTimeoutRef.current != null) {
-          window.clearTimeout(drawerZoomResetTimeoutRef.current);
-        }
-        if (drawerZoomResetLateTimeoutRef.current != null) {
-          window.clearTimeout(drawerZoomResetLateTimeoutRef.current);
-        }
-        if (drawerZoomResetIntervalRef.current != null) {
-          window.clearInterval(drawerZoomResetIntervalRef.current);
-        }
-        if (drawerZoomResetIntervalStopRef.current != null) {
-          window.clearTimeout(drawerZoomResetIntervalStopRef.current);
-        }
-        if (zoomLockTimeoutRef.current != null) {
-          window.clearTimeout(zoomLockTimeoutRef.current);
-        }
-        setZoomLockActive(true);
-        setCanvasToScale(1, 0);
-        drawerZoomResetTimeoutRef.current = window.setTimeout(() => {
-          setCanvasToScale(1, 0);
-        }, ZOOM_FIT_ANIMATION_MS + 50);
-        drawerZoomResetLateTimeoutRef.current = window.setTimeout(() => {
-          setCanvasToScale(1, 0);
-        }, 800);
-        drawerZoomResetIntervalRef.current = window.setInterval(() => {
-          setCanvasToScale(1, 0);
-        }, 120);
-        drawerZoomResetIntervalStopRef.current = window.setTimeout(() => {
-          if (drawerZoomResetIntervalRef.current != null) {
-            window.clearInterval(drawerZoomResetIntervalRef.current);
-            drawerZoomResetIntervalRef.current = null;
-          }
-        }, 1400);
-        zoomLockTimeoutRef.current = window.setTimeout(() => {
-          setZoomLockActive(false);
-        }, 1500);
-        canvasZoomRef.current = 1;
-        setCanvasZoom(1);
-        return;
-      }
-
-      fitCanvasInView();
-    });
-
-    return () => {
-      window.cancelAnimationFrame(id);
-      if (drawerZoomResetTimeoutRef.current != null) {
-        window.clearTimeout(drawerZoomResetTimeoutRef.current);
-        drawerZoomResetTimeoutRef.current = null;
-      }
-      if (drawerZoomResetLateTimeoutRef.current != null) {
-        window.clearTimeout(drawerZoomResetLateTimeoutRef.current);
-        drawerZoomResetLateTimeoutRef.current = null;
-      }
-      if (drawerZoomResetIntervalRef.current != null) {
-        window.clearInterval(drawerZoomResetIntervalRef.current);
-        drawerZoomResetIntervalRef.current = null;
-      }
-      if (drawerZoomResetIntervalStopRef.current != null) {
-        window.clearTimeout(drawerZoomResetIntervalStopRef.current);
-        drawerZoomResetIntervalStopRef.current = null;
-      }
-      if (zoomLockTimeoutRef.current != null) {
-        window.clearTimeout(zoomLockTimeoutRef.current);
-        zoomLockTimeoutRef.current = null;
-      }
-    };
-  }, [fitCanvasInView, drawerWidth, drawerLength, isMobileLayout, setCanvasToScale]);
+    const id = window.requestAnimationFrame(() => fitCanvasInView());
+    return () => window.cancelAnimationFrame(id);
+  }, [fitCanvasInView, drawerWidth, drawerLength, layoutResizeKey]);
 
   const quickActionsAvailable = !(hideQuickActions && isMobileLayout);
-  const mobileActionsLiftPx = isMobileLayout ? Math.max(0, mobileBottomInsetPx - 80) : 0;
-  const mobileActionsBottom = `calc(0.75rem + env(safe-area-inset-bottom) + ${mobileActionsLiftPx}px)`;
-  const mobileActionsToggleBottom = `calc(5rem + env(safe-area-inset-bottom) + ${mobileActionsLiftPx}px)`;
-  const resetActionsPosition = useCallback(() => {
-    setActionsOffset({ x: 0, y: 0 });
-  }, []);
-
-  const startActionsDrag = useCallback(
-    (clientX: number, clientY: number) => {
-      if (!isMobileLayout) return;
-      const rect = actionsDragElementRef.current?.getBoundingClientRect() ?? null;
-      actionsDragRef.current = {
-        startX: clientX,
-        startY: clientY,
-        originX: actionsOffset.x,
-        originY: actionsOffset.y,
-        rect
-      };
-      actionsClickBlockedRef.current = false;
-      setIsDraggingActions(true);
-    },
-    [actionsOffset.x, actionsOffset.y, isMobileLayout]
-  );
-
-  const handleActionsDragStart = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    startActionsDrag(event.clientX, event.clientY);
-    event.preventDefault();
-  };
-
-  const handleActionsMouseDown = (event: ReactMouseEvent<HTMLButtonElement>) => {
-    startActionsDrag(event.clientX, event.clientY);
-    event.preventDefault();
-  };
-
-  const shouldStartActionsDragFromTarget = (target: EventTarget | null) => {
-    if (target instanceof Element) {
-      return !!target.closest('[data-testid="quick-actions-drag-handle"]');
-    }
-    if (target instanceof Node) {
-      return !!target.parentElement?.closest('[data-testid="quick-actions-drag-handle"]');
-    }
-    return false;
-  };
-
-  const handleActionsContainerPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!shouldStartActionsDragFromTarget(event.target)) return;
-    startActionsDrag(event.clientX, event.clientY);
-    event.preventDefault();
-  };
-
-  const handleActionsContainerMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
-    if (!shouldStartActionsDragFromTarget(event.target)) return;
-    startActionsDrag(event.clientX, event.clientY);
-    event.preventDefault();
-  };
-
-  useEffect(() => {
-    const handle = actionsHandleRef.current;
-    if (!handle) return;
-    const handleMouseDown = (event: MouseEvent) => {
-      if (event.button !== 0) return;
-      startActionsDrag(event.clientX, event.clientY);
-      event.preventDefault();
-    };
-    handle.addEventListener('mousedown', handleMouseDown);
-    return () => handle.removeEventListener('mousedown', handleMouseDown);
-  }, [startActionsDrag]);
-
-  useEffect(() => {
-    const handleMove = (event: PointerEvent | MouseEvent) => {
-      const drag = actionsDragRef.current;
-      if (!drag) return;
-      const distanceX = event.clientX - drag.startX;
-      const distanceY = event.clientY - drag.startY;
-      let clampedDistanceX = distanceX;
-      let clampedDistanceY = distanceY;
-      if (drag.rect) {
-        const minDx = ACTIONS_DRAG_MARGIN_PX - drag.rect.left;
-        const maxDx = window.innerWidth - ACTIONS_DRAG_MARGIN_PX - drag.rect.right;
-        const minDy = ACTIONS_DRAG_MARGIN_PX - drag.rect.top;
-        const maxDy = window.innerHeight - ACTIONS_DRAG_MARGIN_PX - drag.rect.bottom;
-        clampedDistanceX = Math.min(Math.max(distanceX, minDx), maxDx);
-        clampedDistanceY = Math.min(Math.max(distanceY, minDy), maxDy);
-      }
-      if (!actionsClickBlockedRef.current && distanceX * distanceX + distanceY * distanceY > 16) {
-        actionsClickBlockedRef.current = true;
-      }
-      setActionsOffset({
-        x: drag.originX + clampedDistanceX,
-        y: drag.originY + clampedDistanceY
-      });
-    };
-    const handleEnd = () => {
-      const drag = actionsDragRef.current;
-      if (!drag) return;
-      actionsDragRef.current = null;
-      setIsDraggingActions(false);
-    };
-
-    window.addEventListener('mousemove', handleMove);
-    window.addEventListener('pointermove', handleMove);
-    window.addEventListener('mouseup', handleEnd);
-    window.addEventListener('pointerup', handleEnd);
-    window.addEventListener('pointercancel', handleEnd);
-    return () => {
-      window.removeEventListener('mousemove', handleMove);
-      window.removeEventListener('pointermove', handleMove);
-      window.removeEventListener('mouseup', handleEnd);
-      window.removeEventListener('pointerup', handleEnd);
-      window.removeEventListener('pointercancel', handleEnd);
-    };
-  }, []);
+  const homeZoomPercent = Math.round(homeZoom * 100);
 
   const shouldStartCanvasPan = useCallback((target: EventTarget | null) => {
     if (!(target instanceof HTMLElement)) return false;
-    if (target.closest('[data-testid="placed-bin"]')) return false;
     if (target.closest('[data-testid="placement-editor"]')) return false;
-    if (target.closest('[data-testid="canvas-how-to"]')) return false;
-    if (target.closest('[data-testid="canvas-how-to-collapsed"]')) return false;
+    if (target.closest('[data-testid="how-to-modal"]')) return false;
     if (target.closest('[data-tour="quick-actions-pill"]')) return false;
     if (target.closest('button, input, select, textarea, a, [role="button"], [contenteditable="true"]')) {
       return false;
@@ -986,6 +728,16 @@ export function Canvas({
     const handleKeyDown = (event: KeyboardEvent) => {
       if (tourActive) return;
       if (isTypingTarget(event.target)) return;
+      if (event.key === 'Enter' || event.key === ' ') {
+        const target = event.target instanceof HTMLElement ? event.target : null;
+        const placementNode = target?.closest('[data-testid="placed-bin"]') as HTMLElement | null;
+        const placementId = placementNode?.getAttribute('data-placement-id');
+        if (placementNode && placementId) {
+          event.preventDefault();
+          openEditorForPlacement(placementId, placementNode);
+          return;
+        }
+      }
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       const key = event.key.toLowerCase();
       if (key === 'g') {
@@ -1005,7 +757,7 @@ export function Canvas({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleClearLayout, handleSuggestLayout, placements.length, tourActive]);
+  }, [handleClearLayout, handleSuggestLayout, openEditorForPlacement, placements.length, tourActive]);
 
   const handleCanvasPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (tourActive || paintMode || event.pointerType === 'touch' || event.button !== 0) return;
@@ -1044,13 +796,6 @@ export function Canvas({
   const handleWheelZoom = useCallback((event: WheelEvent) => {
     if (tourActive || paintMode) return;
     if (!shouldStartCanvasPan(event.target)) return;
-    if (!event.ctrlKey && !event.metaKey) {
-      if (!zoomHintShownRef.current) {
-        setToast({ type: 'info', message: 'Hold Ctrl/Cmd + scroll to zoom.' });
-        zoomHintShownRef.current = true;
-      }
-      return;
-    }
     event.preventDefault();
     const normalizedDeltaY = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
     wheelZoomDeltaRef.current += normalizedDeltaY;
@@ -1096,45 +841,10 @@ export function Canvas({
     };
   }, [drawerLength, drawerWidth]);
 
-  const getPlacementSize = useCallback(
-    (placement: Placement) => {
-      const bin = bins.find((b) => b.id === placement.binId);
-      const width = placement.width ?? bin?.width;
-      const length = placement.length ?? bin?.length;
-      if (width == null || length == null) return null;
-      return { width, length, bin };
-    },
-    [bins]
-  );
-
   const attachDropAreaRef = (node: HTMLDivElement | null) => {
     dropAreaRef.current = node;
     setDropNodeRef(node);
   };
-
-  const selectedPlacementIds = editor?.placementIds ?? [];
-  const selectedCount = selectedPlacementIds.length;
-  const selectedPlacement = selectedPlacementIds.length > 0
-    ? placements.find((p) => p.id === selectedPlacementIds[0]) ?? null
-    : null;
-  const selectedSize = selectedPlacement ? getPlacementSize(selectedPlacement) : null;
-  const editorPosition = useMemo(() => {
-    if (!editor) return null;
-    const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : Number.POSITIVE_INFINITY;
-    const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : Number.POSITIVE_INFINITY;
-    let left = editor.x + EDITOR_OFFSET_PX;
-    if (left + EDITOR_WIDTH_PX + VIEWPORT_PADDING_PX > viewportWidth) {
-      left = editor.x - EDITOR_WIDTH_PX - EDITOR_OFFSET_PX;
-    }
-    const maxLeft = Math.max(VIEWPORT_PADDING_PX, viewportWidth - EDITOR_WIDTH_PX - VIEWPORT_PADDING_PX);
-    left = Math.min(Math.max(VIEWPORT_PADDING_PX, left), maxLeft);
-    const maxTop = Math.max(VIEWPORT_PADDING_PX, viewportHeight - EDITOR_HEIGHT_PX - VIEWPORT_PADDING_PX);
-    const top = Math.min(
-      Math.max(VIEWPORT_PADDING_PX, editor.y + EDITOR_OFFSET_PX),
-      maxTop
-    );
-    return { left, top };
-  }, [editor]);
 
   const invalidPlacementIds = useMemo(() => {
     const invalid = new Set<string>();
@@ -1286,7 +996,9 @@ export function Canvas({
       const result = addPlacement(drag.binId, dropX, dropY);
       debugLog('drop result status', result.status);
       if (result.status === 'blocked') {
-        setToast({ type: 'error', message: 'No room for that bin.' });
+        const message = 'No room for that bin.';
+        setToast({ type: 'error', message });
+        setCanvasAlert({ type: 'error', message });
       }
       if (result.status === 'autofit') {
         setToast({ type: 'info', message: 'Placed in nearest available spot.' });
@@ -1470,7 +1182,7 @@ export function Canvas({
   });
 
   return (
-    <div className={`flex-1 min-h-0 min-w-0 bg-[#F6F7F8] relative overflow-visible flex flex-col ${paintMode ? 'cursor-copy' : ''}`}>
+    <div className={`h-full flex-1 min-h-0 min-w-0 bg-[#F6F7F8] relative overflow-visible flex flex-col ${paintMode ? 'cursor-copy' : ''}`}>
       {/* Canvas Area */}
       <div
         data-testid="canvas-scroll-container"
@@ -1478,7 +1190,11 @@ export function Canvas({
         data-canvas-x={canvasPosition.x.toFixed(1)}
         data-canvas-y={canvasPosition.y.toFixed(1)}
         className={`flex-1 min-h-0 min-w-0 overflow-hidden ${isMobileLayout ? 'p-4 pt-5 hide-scrollbar' : 'p-0'}`}
-        style={isMobileLayout && mobileBottomInsetPx > 0 ? { paddingBottom: `${mobileBottomInsetPx}px` } : undefined}
+        style={
+          isMobileLayout && mobileBottomSafeInsetPx > 0
+            ? { paddingBottom: `${mobileBottomSafeInsetPx}px` }
+            : undefined
+        }
       >
         <div
           ref={canvasViewportRef}
@@ -1492,18 +1208,20 @@ export function Canvas({
         >
           <TransformWrapper
             key={`${drawerWidth}-${drawerLength}`}
-            minScale={zoomLockActive ? 1 : MIN_CANVAS_ZOOM}
-            maxScale={zoomLockActive ? 1 : MAX_CANVAS_ZOOM}
+            minScale={MIN_CANVAS_ZOOM}
+            maxScale={MAX_CANVAS_ZOOM}
             centerOnInit
             centerZoomedOut={false}
             limitToBounds={false}
             disablePadding
-            smooth
             disabled={tourActive}
-            panning={{ disabled: !isMobileLayout }}
+            panning={{ disabled: !isMobileLayout, velocityDisabled: true }}
             wheel={{ disabled: true }}
             pinch={{ step: 5 }}
             doubleClick={{ disabled: true }}
+            zoomAnimation={{ disabled: true, animationTime: 0 }}
+            alignmentAnimation={{ disabled: true }}
+            velocityAnimation={{ disabled: true }}
             onInit={handleCanvasInit}
             onTransformed={handleCanvasTransformed}
           >
@@ -1555,9 +1273,18 @@ export function Canvas({
                     </div>
                   </div>
 
+                  <div id="canvas-instructions" className="sr-only">
+                    Layout canvas. Drag bins from the catalog here. Keyboard: focus a catalog card
+                    and press Enter to place a bin, then focus a placed bin and press Enter to edit.
+                  </div>
                   <div
                     ref={attachDropAreaRef}
-                    className="absolute bg-white shadow-inner"
+                    id="canvas-drop-zone"
+                    role="region"
+                    aria-label="Layout canvas"
+                    aria-describedby="canvas-instructions"
+                    tabIndex={0}
+                    className="absolute bg-white shadow-inner focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14476B]/40 focus-visible:ring-offset-2 focus-visible:ring-offset-[#F6F7F8]"
                     style={{
                       left: CANVAS_PADDING,
                       top: CANVAS_PADDING,
@@ -1566,7 +1293,22 @@ export function Canvas({
                     }}
                     data-testid="canvas-drop-area"
                     data-tour="canvas-drop-zone"
+                    onFocus={() => setQuickActionsTabbable(true)}
                   >
+                    {canvasAlert && (
+                      <div
+                        role={canvasAlert.type === 'error' ? 'alert' : 'status'}
+                        aria-live={canvasAlert.type === 'error' ? 'assertive' : 'polite'}
+                        className={`absolute left-2 top-2 z-20 flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold shadow-sm pointer-events-none ${
+                          canvasAlert.type === 'error'
+                            ? 'bg-red-100 text-red-700'
+                            : 'bg-slate-900 text-white'
+                        }`}
+                      >
+                        <AlertCircle className="h-3 w-3" />
+                        {canvasAlert.message}
+                      </div>
+                    )}
                     {showGrid && (
                       <div
                         data-testid="grid-overlay"
@@ -1604,6 +1346,7 @@ export function Canvas({
                         placement={placement}
                         size={size}
                         gridSize={gridSize}
+                        zoom={canvasZoom}
                         dragStatus={dragStatus}
                         paintMode={paintMode}
                         isInvalid={invalidPlacementIds.has(placement.id)}
@@ -1615,9 +1358,9 @@ export function Canvas({
                             paintPlacement(placement.id);
                             return;
                             }
-                            setEditor({ placementIds: [placement.id], x: event.clientX, y: event.clientY });
-                            closePlacementEditor();
+                            openPlacementEditor([placement.id], event.clientX, event.clientY);
                           }}
+                        onKeyActivate={(element) => openEditorForPlacement(placement.id, element)}
                         />
                       );
                     })}
@@ -1636,723 +1379,187 @@ export function Canvas({
           </TransformWrapper>
         </div>
       </div>
-      
-
-      {!tourActive && showHowTo && (
-        <div
-          data-testid="canvas-how-to"
-          className={`absolute top-4 left-4 z-[60] rounded-xl border border-slate-200 bg-white/95 shadow-lg backdrop-blur p-4 ${
-            isMobileLayout ? 'w-[calc(100%-2rem)] max-w-sm' : 'w-80'
-          }`}
-        >
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">How To Start</p>
-              <h3 className="text-sm font-semibold text-[#0B0B0C] mt-1">Build your first layout in under a minute</h3>
-            </div>
-            <button
-              type="button"
-              className="text-xs text-slate-400 hover:text-slate-600"
-              onClick={hideHowTo}
-            >
-              Hide
-            </button>
-          </div>
-          <ol className="mt-3 space-y-1 text-xs text-slate-600">
-            <li>1. Drag a bin from the catalog to the canvas.</li>
-            <li>2. Drop it in the drawer and repeat for more bins.</li>
-            <li>3. Click any bin (or placed-item group) to edit size, color, and label.</li>
-          </ol>
-          <Button
-            size="sm"
-            className="mt-3"
-            onClick={startTour}
+      {!tourActive && howToModalOpen && (
+        <>
+          <div
+            className="fixed inset-0 z-[70] bg-slate-900/45"
+            onClick={() => setHowToModalOpen(false)}
+            aria-hidden="true"
+          />
+          <div
+            data-testid="how-to-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="how-to-modal-title"
+            className={`fixed z-[71] left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100%-2rem)] rounded-2xl border border-slate-200 bg-white shadow-2xl p-4 sm:p-5 ${
+              isMobileLayout ? 'max-w-md' : 'max-w-xl'
+            }`}
           >
-            Take Tour
-          </Button>
-        </div>
-      )}
-
-      {!tourActive && !showHowTo && (
-        <div
-          data-testid="canvas-how-to-collapsed"
-          className={`absolute ${isMobileLayout ? 'top-4' : 'top-16'} left-4 z-[60] rounded-full border border-slate-200 bg-white/95 shadow-md backdrop-blur px-3 py-2 flex items-center gap-3 ${
-            isMobileLayout ? 'max-w-[calc(100%-2rem)]' : ''
-          }`}
-        >
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">How To Start</p>
-          <button
-            type="button"
-            className="text-xs font-medium text-[#14476B] hover:text-[#1a5a8a]"
-            onClick={showHowToCard}
-          >
-            Show
-          </button>
-        </div>
-      )}
-
-      {quickActionsAvailable && !showHowTo && isMobileLayout && quickActionsOpen && (
-        <div
-          data-tour="quick-actions-pill"
-          data-actions-offset-x={actionsOffset.x.toFixed(1)}
-          data-actions-offset-y={actionsOffset.y.toFixed(1)}
-          ref={(node) => {
-            actionsDragElementRef.current = node;
-          }}
-          onPointerDownCapture={handleActionsContainerPointerDown}
-          onMouseDownCapture={handleActionsContainerMouseDown}
-          className={`absolute left-2 right-2 bg-white/90 backdrop-blur shadow-lg border border-slate-200 rounded-2xl px-3 py-2 flex flex-col gap-3 relative z-50 ${
-            disableQuickActions ? 'pointer-events-none' : ''
-          }`}
-          style={{ transform: `translate(${actionsOffset.x}px, ${actionsOffset.y}px)`, bottom: mobileActionsBottom }}
-        >
-          <button
-            type="button"
-            ref={actionsHandleRef}
-            data-testid="quick-actions-drag-handle"
-            aria-label="Drag quick actions"
-            title="Drag quick actions (double click to reset)"
-            onPointerDown={handleActionsDragStart}
-            onMouseDown={handleActionsMouseDown}
-            onDoubleClick={resetActionsPosition}
-            className={`absolute -top-3 left-1/2 -translate-x-1/2 h-7 px-3 rounded-full border border-slate-200 bg-white text-slate-500 flex items-center justify-center gap-1 text-[10px] font-semibold uppercase tracking-wide ${
-              isDraggingActions ? 'cursor-grabbing' : 'cursor-grab'
-            } touch-none`}
-          >
-            <GripHorizontal className="h-3.5 w-3.5" />
-            Drag
-          </button>
-
-          <div className="flex flex-wrap items-center justify-center gap-4">
-            <div className="flex flex-col items-center gap-1">
-              <span className="text-xs uppercase tracking-wide text-slate-400">History</span>
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={undo}
-                  disabled={!canUndo}
-                  title="Undo (Ctrl/Cmd+Z)"
-                  aria-label="Undo"
-                  className="hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600 h-11 w-11"
-                >
-                  <RotateCcw className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={redo}
-                  disabled={!canRedo}
-                  title="Redo (Shift+Ctrl/Cmd+Z)"
-                  aria-label="Redo"
-                  className="hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600 h-11 w-11"
-                >
-                  <RotateCw className="h-4 w-4" />
-                </button>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">How To Start</p>
+                <h3 id="how-to-modal-title" className="mt-1 text-base font-semibold text-[#0B0B0C]">
+                  Build your first layout in under a minute
+                </h3>
               </div>
-            </div>
-
-            <div className="flex flex-col items-center gap-1">
-              <span className="text-xs uppercase tracking-wide text-slate-400">Grid</span>
-              <button
-                onClick={() => setShowGrid(!showGrid)}
-                title="Toggle grid (G)"
-                aria-label="Toggle grid"
-                aria-pressed={showGrid}
-                className={`rounded-full transition-colors h-11 w-11 ${
-                  showGrid ? 'bg-[#14476B]/10 text-[#14476B]' : 'hover:bg-slate-100 text-slate-600'
-                }`}
-              >
-                <Grid className="h-4 w-4" />
-              </button>
-            </div>
-
-            {!isQuickActionsMini && (
-              <div className="flex flex-col items-center gap-1">
-                <span className="text-xs uppercase tracking-wide text-slate-400">Snap</span>
-                <div className="flex items-center gap-1">
-                  <input
-                    ref={snapInputRef}
-                    aria-label="Snap to grid"
-                    title="Snap to the nearest grid line (inches)"
-                    type="number"
-                    min={SNAP_MIN}
-                    max={SNAP_MAX}
-                    step={0.5}
-                    value={snapDraft}
-                    inputMode="decimal"
-                    onChange={(e) => handleSnapInputChange(e.target.value)}
-                    onBlur={commitSnapInput}
-                    aria-invalid={Boolean(snapHelper)}
-                    aria-describedby={snapHelper ? 'snap-helper' : undefined}
-                    className="w-14 px-2 py-2 min-h-10 text-xs rounded-md border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#14476B]/20"
-                  />
-                  <span className="text-[10px] text-slate-400">in</span>
-                </div>
-                {snapHelper && (
-                  <span id="snap-helper" className="text-[10px] text-amber-600">
-                    {snapHelper}
-                  </span>
-                )}
-              </div>
-            )}
-
-            {!isQuickActionsMini && (
-              <div className="flex flex-col items-center gap-1">
-                <span className="text-xs uppercase tracking-wide text-slate-400">View</span>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    aria-label="Zoom out"
-                    title="Zoom out"
-                    disabled={canvasZoom <= MIN_CANVAS_ZOOM}
-                    onClick={() => zoomCanvas(canvasZoomRef.current - 0.1)}
-                    className="hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600 h-11 w-11"
-                  >
-                    <ZoomOut className="h-4 w-4" />
-                  </button>
-                  <span className="w-12 text-center text-xs font-medium text-slate-600">
-                    <span data-testid="canvas-zoom-value">{Math.round(canvasZoom * 100)}%</span>
-                  </span>
-                  <button
-                    type="button"
-                    aria-label="Zoom in"
-                    title="Zoom in"
-                    disabled={canvasZoom >= MAX_CANVAS_ZOOM}
-                    onClick={() => zoomCanvas(canvasZoomRef.current + 0.1)}
-                    className="hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600 h-11 w-11"
-                  >
-                    <ZoomIn className="h-4 w-4" />
-                  </button>
-                  <Button
-                    data-testid="home-canvas-button"
-                    size="sm"
-                    variant="ghost"
-                    title="Home canvas"
-                    aria-label="Home canvas"
-                    className="min-h-10 px-3 text-slate-700"
-                    leftIcon={<House className="h-3 w-3" />}
-                    onClick={fitCanvasInView}
-                  >
-                    Home
-                  </Button>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {!isQuickActionsMini && (
-            <div className="flex flex-wrap items-center justify-center gap-3">
-              <div data-tour="canvas-actions" className="flex flex-col items-center gap-1">
-                <span className="text-xs uppercase tracking-wide text-slate-400">Layout</span>
-                {hasPlacements ? (
-                  <div className="flex flex-wrap items-center justify-center gap-2">
-                    <Button
-                      data-testid="suggest-layout-button"
-                      size="sm"
-                      variant="ghost"
-                      className="text-[#14476B] min-h-10 px-3"
-                      leftIcon={<Sparkles className="h-3 w-3" />}
-                      title="Suggest layout (S)"
-                      onClick={handleSuggestLayout}
-                    >
-                      {`Suggest (${suggestModeLabel})`}
-                    </Button>
-                    <Button
-                      data-testid="clear-layout-button"
-                      size="sm"
-                      variant="ghost"
-                      className="text-slate-600 min-h-10 px-3"
-                      leftIcon={<Trash2 className="h-3 w-3" />}
-                      title="Clear layout (C)"
-                      onClick={handleClearLayout}
-                    >
-                      Clear
-                    </Button>
-                    <div className="flex flex-col items-center gap-1">
-                      <Button
-                        data-testid="paint-mode-toggle"
-                        data-tour="paint-action"
-                        size="sm"
-                        variant="ghost"
-                        className={`${paintMode ? 'text-[#14476B] bg-[#14476B]/10' : 'text-slate-600'} min-h-10 px-3`}
-                        leftIcon={<PaintBucket className="h-3 w-3" />}
-                        onClick={togglePaintMode}
-                        aria-label={paintMode ? 'Disable paint mode' : 'Enable paint mode'}
-                        aria-pressed={paintMode}
-                      >
-                        {paintMode ? 'Paint On' : 'Paint'}
-                      </Button>
-                      {paintMode && (
-                        <select
-                          data-testid="paint-color-select"
-                          value={paintColorSelection}
-                          onChange={(e) => handlePaintColorSelectionChange(e.target.value)}
-                          aria-label="Paint color"
-                          className="w-28 rounded-md border border-slate-200 px-2 py-2 min-h-10 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#14476B]/20"
-                        >
-                          {PRESET_COLORS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                          <option value={CUSTOM_COLOR_VALUE}>Custom</option>
-                        </select>
-                      )}
-                      {paintMode && paintColorSelection === CUSTOM_COLOR_VALUE && (
-                        <input
-                          data-testid="paint-color-custom"
-                          aria-label="Paint custom color"
-                          type="color"
-                          value={paintColorDraft}
-                          onChange={(e) => handlePaintColorChange(e.target.value)}
-                          className="h-7 w-10 rounded-md border border-slate-200 bg-white"
-                        />
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-xs text-slate-400">Add a bin to enable layout tools.</div>
-                )}
-              </div>
-            </div>
-          )}
-
-          <div className="flex items-center gap-2">
-            {!isQuickActionsMini && (
               <button
                 type="button"
-                onClick={resetActionsPosition}
-                className="rounded-full text-slate-600 hover:bg-slate-100 flex items-center justify-center gap-1 h-11 px-3"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 text-slate-500 hover:bg-slate-100"
+                onClick={() => setHowToModalOpen(false)}
+                aria-label="Close how to"
               >
-                <span className="text-xs font-semibold uppercase tracking-wide">Reset</span>
+                <X className="h-4 w-4" />
               </button>
-            )}
-            <button
-              type="button"
-              onClick={() => setQuickActionsMode(isQuickActionsMini ? 'full' : 'mini')}
-              className="rounded-full text-slate-600 hover:bg-slate-100 flex items-center justify-center gap-1 h-11 px-3"
-            >
-              <span className="text-xs font-semibold uppercase tracking-wide">
-                {isQuickActionsMini ? 'More' : 'Less'}
-              </span>
-            </button>
-            <button
-              type="button"
-              data-testid="quick-actions-toggle"
-              aria-expanded={quickActionsOpen}
-              aria-label="Collapse quick actions"
-              title="Collapse quick actions"
-              onClick={() => setQuickActionsOpen(false)}
-              className="rounded-full text-slate-600 hover:bg-slate-100 flex items-center justify-center gap-1 h-11 px-3"
-            >
-              <ChevronDown className="h-4 w-4" />
-              <span className="text-xs font-semibold uppercase tracking-wide">Hide</span>
-            </button>
+            </div>
+            <ol className="mt-4 space-y-2 text-sm text-slate-600">
+              <li>1. Drag a bin from the catalog to the canvas.</li>
+              <li>2. Drop it in the drawer and repeat for more bins.</li>
+              <li>3. Click any bin (or placed-item group) to edit size, color, and label.</li>
+              <li>4. Use Export PDF or Copy Share Link from the Summary panel.</li>
+              <li>5. Use Open Etsy Cart in the Summary panel when your list is ready.</li>
+            </ol>
+            <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => setHowToModalOpen(false)}
+              >
+                Close
+              </Button>
+              <Button
+                size="sm"
+                onClick={startTour}
+              >
+                Take Tour
+              </Button>
+            </div>
           </div>
+        </>
+      )}
+
+      {suggestStatus && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-full shadow-md text-xs font-semibold bg-white border border-slate-200 text-slate-700">
+          {suggestStatus === 'packing' ? 'Packing bins…' : 'Randomizing layout…'}
         </div>
       )}
 
       {paintMode && (
         <button
           type="button"
-          data-testid="paint-mode-indicator"
-          onClick={() => setPaintMode(false)}
-          className="absolute top-4 right-4 z-[60] rounded-full border border-[#14476B]/20 bg-white/95 shadow-md backdrop-blur px-3 py-2 flex items-center gap-2 text-xs font-semibold text-[#14476B] hover:bg-[#14476B]/10"
+          data-testid="paint-mode-chip"
+          onClick={togglePaintMode}
+          className="absolute right-4 top-14 sm:top-20 z-[55] inline-flex items-center gap-2 rounded-full border border-[#14476B]/30 bg-white/95 px-3 py-1.5 text-xs font-semibold text-[#14476B] shadow-md hover:bg-[#14476B]/10"
+          aria-label="Disable paint mode"
+          title="Disable paint mode"
         >
-          <PaintBucket className="h-3.5 w-3.5" />
+          <span
+            className="h-2.5 w-2.5 rounded-full border border-slate-200"
+            style={{ backgroundColor: getActivePaintColor() }}
+            aria-hidden="true"
+          />
           Paint On
-          <span className="text-[10px] font-medium text-slate-500">Tap to exit</span>
+          <span className="text-[11px] font-medium text-slate-500">Tap to exit</span>
         </button>
       )}
 
-      {quickActionsAvailable && !showHowTo && !isMobileLayout && (
-        <div
-          data-tour="quick-actions-pill"
-          className="absolute top-4 inset-x-0 z-50 flex justify-center pointer-events-none px-4"
-        >
-          <div
-            className={`bg-white/90 backdrop-blur shadow-lg border border-slate-200 rounded-2xl px-3 py-2 inline-flex items-center gap-2 w-full max-w-[720px] ${
-              disableQuickActions ? 'pointer-events-none' : 'pointer-events-auto'
-            }`}
-          >
-            <div className="flex flex-wrap items-end justify-center gap-x-2 gap-y-2 xl:flex-nowrap">
-              <div className="flex flex-col items-center gap-1">
-                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 leading-none">History</span>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={undo}
-                    disabled={!canUndo}
-                    title="Undo (Ctrl/Cmd+Z)"
-                    aria-label="Undo"
-                    className="hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600 p-2"
-                  >
-                    <RotateCcw className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={redo}
-                    disabled={!canRedo}
-                    title="Redo (Shift+Ctrl/Cmd+Z)"
-                    aria-label="Redo"
-                    className="hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600 p-2"
-                  >
-                    <RotateCw className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-
-              <div className="hidden xl:block w-px bg-slate-200 h-8" />
-
-              <div className="flex flex-col items-center gap-1">
-                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 leading-none">Grid</span>
-                <button
-                  onClick={() => setShowGrid(!showGrid)}
-                  title="Toggle grid (G)"
-                  aria-label="Toggle grid"
-                  aria-pressed={showGrid}
-                  className={`rounded-full transition-colors p-2 ${
-                    showGrid ? 'bg-[#14476B]/10 text-[#14476B]' : 'hover:bg-slate-100 text-slate-600'
-                  }`}
-                >
-                  <Grid className="h-4 w-4" />
-                </button>
-              </div>
-
-              <div className="hidden xl:block w-px bg-slate-200 h-8" />
-
-              <div className="flex flex-col items-center gap-1">
-                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 leading-none">Snap</span>
-                <div className="flex items-center gap-1">
-                  <input
-                    ref={snapInputRef}
-                    aria-label="Snap to grid"
-                    title="Snap to the nearest grid line (inches)"
-                    type="number"
-                    min={SNAP_MIN}
-                    max={SNAP_MAX}
-                    step={0.5}
-                    value={snapDraft}
-                    inputMode="decimal"
-                    onChange={(e) => handleSnapInputChange(e.target.value)}
-                    onBlur={commitSnapInput}
-                    aria-invalid={Boolean(snapHelper)}
-                    aria-describedby={snapHelper ? 'snap-helper' : undefined}
-                    className="w-12 px-2 py-1 text-xs rounded-md border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#14476B]/20"
-                  />
-                  <span className="text-[10px] text-slate-400">in</span>
-                </div>
-                {snapHelper && (
-                  <span id="snap-helper" className="text-[10px] text-amber-600">
-                    {snapHelper}
-                  </span>
-                )}
-              </div>
-
-              <div className="hidden xl:block w-px bg-slate-200 h-8" />
-
-              <div className="flex flex-col items-center gap-1">
-                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 leading-none">View</span>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    aria-label="Zoom out"
-                    title="Zoom out"
-                    disabled={canvasZoom <= MIN_CANVAS_ZOOM}
-                    onClick={() => zoomCanvas(canvasZoomRef.current - 0.1)}
-                    className="hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600 p-2"
-                  >
-                    <ZoomOut className="h-4 w-4" />
-                  </button>
-                  <span className="w-10 text-center text-xs font-medium text-slate-600">
-                    <span data-testid="canvas-zoom-value">
-                      {Math.round(canvasZoom * 100)}%
-                    </span>
-                  </span>
-                  <button
-                    type="button"
-                    aria-label="Zoom in"
-                    title="Zoom in"
-                    disabled={canvasZoom >= MAX_CANVAS_ZOOM}
-                    onClick={() => zoomCanvas(canvasZoomRef.current + 0.1)}
-                    className="hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600 p-2"
-                  >
-                    <ZoomIn className="h-4 w-4" />
-                  </button>
-                  <Button
-                    data-testid="home-canvas-button"
-                    size="sm"
-                    variant="ghost"
-                    title="Home canvas"
-                    aria-label="Home canvas"
-                    className="text-slate-700 px-2"
-                    leftIcon={<House className="h-3 w-3" />}
-                    onClick={fitCanvasInView}
-                  >
-                    Home
-                  </Button>
-                </div>
-              </div>
-
-              <div className="hidden xl:block w-px bg-slate-200 h-8" />
-
-              <div data-tour="canvas-actions" className="flex flex-col items-center gap-1">
-                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 leading-none">Layout</span>
-                {hasPlacements ? (
-                  <div className="flex items-center gap-2">
-                    <Button
-                      data-testid="suggest-layout-button"
-                      size="sm"
-                      variant="ghost"
-                      className="text-[#14476B] px-2"
-                      leftIcon={<Sparkles className="h-3 w-3" />}
-                      title="Suggest layout (S)"
-                      onClick={handleSuggestLayout}
-                    >
-                      {`Suggest (${suggestModeLabel})`}
-                    </Button>
-                    <Button
-                      data-testid="clear-layout-button"
-                      size="sm"
-                      variant="ghost"
-                      className="text-slate-600 px-2"
-                      leftIcon={<Trash2 className="h-3 w-3" />}
-                      title="Clear layout (C)"
-                      onClick={handleClearLayout}
-                    >
-                      Clear
-                    </Button>
-                    <div className="flex flex-col items-center gap-1">
-                      <Button
-                        data-testid="paint-mode-toggle"
-                        data-tour="paint-action"
-                        size="sm"
-                        variant="ghost"
-                        className={`${paintMode ? 'text-[#14476B] bg-[#14476B]/10' : 'text-slate-600'} px-2`}
-                        leftIcon={<PaintBucket className="h-3 w-3" />}
-                        onClick={togglePaintMode}
-                        aria-label={paintMode ? 'Disable paint mode' : 'Enable paint mode'}
-                        aria-pressed={paintMode}
-                      >
-                        {paintMode ? 'Paint On' : 'Paint'}
-                      </Button>
-                      {paintMode && (
-                        <select
-                          data-testid="paint-color-select"
-                          value={paintColorSelection}
-                          onChange={(e) => handlePaintColorSelectionChange(e.target.value)}
-                          aria-label="Paint color"
-                          className="w-24 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#14476B]/20"
-                        >
-                          {PRESET_COLORS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                          <option value={CUSTOM_COLOR_VALUE}>Custom</option>
-                        </select>
-                      )}
-                      {paintMode && paintColorSelection === CUSTOM_COLOR_VALUE && (
-                        <input
-                          data-testid="paint-color-custom"
-                          aria-label="Paint custom color"
-                          type="color"
-                          value={paintColorDraft}
-                          onChange={(e) => handlePaintColorChange(e.target.value)}
-                          className="h-7 w-10 rounded-md border border-slate-200 bg-white"
-                        />
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-[10px] text-slate-400">Add a bin to enable layout tools.</div>
-                )}
-              </div>
-
-              <div className="hidden xl:block w-px bg-slate-200 h-8" />
-
-            </div>
-          </div>
-        </div>
+      {quickActionsAvailable && isMobileLayout && (
+        <MobileQuickActions
+          isOpen={quickActionsOpen}
+          isMini={isQuickActionsMini}
+          paintMode={paintMode}
+          disableQuickActions={disableQuickActions}
+          quickActionsTabIndex={quickActionsTabIndex}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          onUndo={undo}
+          onRedo={redo}
+          showGrid={showGrid}
+          onToggleGrid={() => setShowGrid((current) => !current)}
+          snapInputRef={snapInputRef}
+          snapDraft={snapDraft}
+          snapHelper={snapHelper}
+          onSnapInputChange={handleSnapInputChange}
+          onCommitSnapInput={commitSnapInput}
+          canvasZoomPercent={Math.round(canvasZoom * 100)}
+          canZoomOut={canvasZoom > MIN_CANVAS_ZOOM}
+          canZoomIn={canvasZoom < MAX_CANVAS_ZOOM}
+          onZoomOut={() => zoomCanvas(canvasZoomRef.current - 0.1)}
+          onZoomIn={() => zoomCanvas(canvasZoomRef.current + 0.1)}
+          homeZoomPercent={homeZoomPercent}
+          onHomeCanvas={fitCanvasInView}
+          layoutControlsDisabled={layoutControlsDisabled}
+          suggestModeLabel={suggestModeLabel}
+          onSuggestLayout={handleSuggestLayout}
+          onClearLayout={handleClearLayout}
+          onTogglePaintMode={togglePaintMode}
+          paintColorSelection={paintColorSelection}
+          paintColorDraft={paintColorDraft}
+          onPaintColorSelectionChange={handlePaintColorSelectionChange}
+          onPaintColorChange={handlePaintColorChange}
+          onToggleSize={() => setQuickActionsMode(isQuickActionsMini ? 'full' : 'mini')}
+          onCollapse={() => setQuickActionsOpen(false)}
+          onExpand={() => setQuickActionsOpen(true)}
+        />
       )}
 
-      {quickActionsAvailable && !showHowTo && isMobileLayout && !quickActionsOpen && (
-        <button
-          type="button"
-          data-testid="quick-actions-toggle"
-          data-actions-offset-x={actionsOffset.x.toFixed(1)}
-          data-actions-offset-y={actionsOffset.y.toFixed(1)}
-          aria-expanded={quickActionsOpen}
-          aria-label="Expand quick actions"
-          title="Expand quick actions"
-          ref={(node) => {
-            actionsDragElementRef.current = node;
-          }}
-          onPointerDown={(event) => {
-            if (event.button !== 0) return;
-            startActionsDrag(event.clientX, event.clientY);
-          }}
-          onClick={(event) => {
-            if (actionsClickBlockedRef.current) {
-              actionsClickBlockedRef.current = false;
-              event.preventDefault();
-              event.stopPropagation();
-              return;
-            }
-            setQuickActionsOpen(true);
-          }}
-          className={`absolute z-50 rounded-full border border-slate-200 bg-white/95 backdrop-blur shadow-md text-slate-700 flex items-center gap-2 ${
-            isMobileLayout
-              ? 'right-3 px-3 h-11'
-              : 'bottom-6 left-1/2 -translate-x-1/2 px-3 h-10'
-          } ${isDraggingActions ? 'cursor-grabbing' : 'cursor-grab'}`}
-          style={
-            isMobileLayout
-              ? { transform: `translate(${actionsOffset.x}px, ${actionsOffset.y}px)`, bottom: mobileActionsToggleBottom }
-              : { transform: `translate(-50%, 0) translate(${actionsOffset.x}px, ${actionsOffset.y}px)` }
-          }
-        >
-          <ChevronUp className="h-4 w-4" />
-          <span className="text-xs font-semibold uppercase tracking-wide">Actions</span>
-        </button>
+      {quickActionsAvailable && !isMobileLayout && (
+        <DesktopQuickActions
+          paintMode={paintMode}
+          disableQuickActions={disableQuickActions}
+          quickActionsTabIndex={quickActionsTabIndex}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          onUndo={undo}
+          onRedo={redo}
+          showGrid={showGrid}
+          onToggleGrid={() => setShowGrid((current) => !current)}
+          snapInputRef={snapInputRef}
+          snapDraft={snapDraft}
+          snapHelper={snapHelper}
+          onSnapInputChange={handleSnapInputChange}
+          onCommitSnapInput={commitSnapInput}
+          canvasZoomPercent={Math.round(canvasZoom * 100)}
+          canZoomOut={canvasZoom > MIN_CANVAS_ZOOM}
+          canZoomIn={canvasZoom < MAX_CANVAS_ZOOM}
+          onZoomOut={() => zoomCanvas(canvasZoomRef.current - 0.1)}
+          onZoomIn={() => zoomCanvas(canvasZoomRef.current + 0.1)}
+          homeZoomPercent={homeZoomPercent}
+          onHomeCanvas={fitCanvasInView}
+          layoutControlsDisabled={layoutControlsDisabled}
+          suggestModeLabel={suggestModeLabel}
+          onSuggestLayout={handleSuggestLayout}
+          onClearLayout={handleClearLayout}
+          onTogglePaintMode={togglePaintMode}
+          paintColorSelection={paintColorSelection}
+          paintColorDraft={paintColorDraft}
+          onPaintColorSelectionChange={handlePaintColorSelectionChange}
+          onPaintColorChange={handlePaintColorChange}
+        />
       )}
 
       {editor && editorPosition && selectedPlacement && selectedSize && (
-        <div
-          ref={editorRef}
-          data-testid="placement-editor"
-          className="fixed z-50 w-60 rounded-xl border border-slate-200 bg-white shadow-xl p-3 text-sm"
-          style={{ left: editorPosition.left, top: editorPosition.top }}
-        >
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-semibold text-slate-700">Edit Bin</span>
-            <button
-              type="button"
-              onClick={closeEditor}
-              className="text-slate-400 hover:text-slate-600 text-xs"
-            >
-              Close
-            </button>
-          </div>
-
-          <div className="space-y-2">
-            <label className="flex flex-col gap-1 text-xs text-slate-500">
-              Label
-              <input
-                data-testid="placement-label"
-                ref={labelInputRef}
-                type="text"
-                value={labelDraft}
-                onChange={(e) => setLabelDraft(e.target.value)}
-                onBlur={(e) => commitLabel(e.currentTarget.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    commitLabel((e.target as HTMLInputElement).value);
-                    (e.target as HTMLInputElement).blur();
-                  }
-                }}
-                className="w-full rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#14476B]/20"
-                placeholder="Optional label"
-              />
-            </label>
-
-            <label className="flex flex-col gap-1 text-xs text-slate-500">
-              Color
-              <select
-                data-testid="placement-color"
-                value={colorSelection}
-                onChange={(e) => handleColorSelectionChange(e.target.value)}
-                className="w-full rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#14476B]/20"
-              >
-                {PRESET_COLORS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-                <option value={CUSTOM_COLOR_VALUE}>Custom</option>
-              </select>
-            </label>
-
-            {colorSelection === CUSTOM_COLOR_VALUE && (
-              <label className="flex items-center justify-between text-xs text-slate-500">
-                Custom Color
-                <input
-                  data-testid="placement-color-custom"
-                  type="color"
-                  value={colorDraft}
-                  onChange={(e) => handleColorChange(e.target.value)}
-                  className="h-7 w-10 rounded-md border border-slate-200 bg-white"
-                />
-              </label>
-            )}
-
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-xs text-slate-500">
-                <span>Width</span>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    data-testid="size-width-decrease"
-                    onClick={() => handleResize('width', -1)}
-                    disabled={selectedSize.width <= MIN_BIN_SIZE}
-                    className="h-6 w-6 rounded-full border border-slate-200 text-slate-600 disabled:opacity-40"
-                  >
-                    -
-                  </button>
-                  <span className="text-xs font-medium text-slate-700">{selectedSize.width}"</span>
-                  <button
-                    type="button"
-                    data-testid="size-width-increase"
-                    onClick={() => handleResize('width', 1)}
-                    disabled={selectedSize.width >= MAX_BIN_SIZE}
-                    className="h-6 w-6 rounded-full border border-slate-200 text-slate-600 disabled:opacity-40"
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between text-xs text-slate-500">
-                <span>Length</span>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    data-testid="size-length-decrease"
-                    onClick={() => handleResize('length', -1)}
-                    disabled={selectedSize.length <= MIN_BIN_SIZE}
-                    className="h-6 w-6 rounded-full border border-slate-200 text-slate-600 disabled:opacity-40"
-                  >
-                    -
-                  </button>
-                  <span className="text-xs font-medium text-slate-700">{selectedSize.length}"</span>
-                  <button
-                    type="button"
-                    data-testid="size-length-increase"
-                    onClick={() => handleResize('length', 1)}
-                    disabled={selectedSize.length >= MAX_BIN_SIZE}
-                    className="h-6 w-6 rounded-full border border-slate-200 text-slate-600 disabled:opacity-40"
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
-            </div>
-            <p className="text-xs text-slate-400">Sizes adjust in {SIZE_STEP}" steps (min {MIN_BIN_SIZE}", max {MAX_BIN_SIZE}").</p>
-            <Button
-              data-testid="delete-bin-button"
-              size="sm"
-              variant="ghost"
-              className="w-full justify-center text-red-600 hover:bg-red-50"
-              aria-label={`Delete ${selectedCount} bin${selectedCount === 1 ? '' : 's'}`}
-              leftIcon={<Trash2 className="h-3 w-3" />}
-              onClick={() => {
-                removePlacements(selectedPlacementIds);
-                closeEditor();
-              }}
-            >
-              Delete {selectedCount === 1 ? 'Bin' : 'Bins'}
-            </Button>
-          </div>
-        </div>
+        <PlacementEditor
+          editorRef={editorRef}
+          labelInputRef={labelInputRef}
+          isMobileLayout={isMobileLayout}
+          editorPosition={editorPosition}
+          selectedCount={selectedCount}
+          selectedSize={selectedSize}
+          labelDraft={labelDraft}
+          onLabelDraftChange={setLabelDraft}
+          onLabelCommit={commitLabel}
+          colorSelection={colorSelection}
+          onColorSelectionChange={handleColorSelectionChange}
+          colorDraft={colorDraft}
+          onColorChange={handleColorChange}
+          onResize={handleResize}
+          resizeError={resizeError}
+          minBinSize={minBinSize}
+          maxBinSize={maxBinSize}
+          sizeStep={sizeStep}
+          onDelete={deleteSelectedPlacements}
+          onClose={closeEditor}
+        />
       )}
 
       {toast && (
@@ -2451,21 +1658,25 @@ function DraggablePlacement({
   placement,
   size,
   gridSize,
+  zoom,
   dragStatus,
   paintMode,
   highlight,
   shouldBlockClick,
   onClick,
+  onKeyActivate,
   isInvalid
 }: {
   placement: Placement;
   size: { width: number; length: number; bin?: Bin };
   gridSize: number;
+  zoom: number;
   dragStatus: { placementId: string; fits: boolean } | null;
   paintMode: boolean;
   highlight?: { id: string; type: 'info' | 'error' } | null;
   shouldBlockClick?: () => boolean;
   onClick: (event: ReactMouseEvent<HTMLDivElement>) => void;
+  onKeyActivate?: (element: HTMLDivElement) => void;
   isInvalid: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
@@ -2491,6 +1702,10 @@ function DraggablePlacement({
 
   const translate = transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined;
   const backgroundColor = placement.color ?? DEFAULT_BIN_COLOR;
+  const effectiveWidth = size.width * gridSize * zoom;
+  const effectiveHeight = size.length * gridSize * zoom;
+  const showPrimaryLabel = effectiveWidth >= 36 && effectiveHeight >= 24;
+  const showSecondaryLabel = effectiveWidth >= 48 && effectiveHeight >= 36;
   const colorLabel = getColorLabel(backgroundColor);
   const sizeLabel = `${size.length} by ${size.width} inches`;
   const ariaLabelParts = [
@@ -2501,16 +1716,20 @@ function DraggablePlacement({
   ].filter(Boolean) as string[];
   const ariaLabel = ariaLabelParts.join(', ');
   const dragAttributes = paintMode ? undefined : attributes;
-  const dragListeners = paintMode ? undefined : listeners;
+  const dragListenerSet = paintMode ? undefined : listeners;
+  const { onKeyDown: dragKeyDown, ...dragListeners } = dragListenerSet ?? {};
 
   return (
     <div
       data-testid="placed-bin"
+      data-placement-id={placement.id}
+      role="button"
+      tabIndex={0}
       aria-label={ariaLabel}
       ref={setNodeRef}
       className={`absolute bg-white border border-slate-300 shadow-sm hover:shadow-md hover:border-[#14476B] hover:z-10 transition-all group flex items-center justify-center ${
         paintMode ? 'cursor-copy' : 'cursor-move'
-      } ${isHighlighted ? 'animate-pulse' : ''}`}
+      } ${isHighlighted ? 'animate-pulse' : ''} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14476B]/40 focus-visible:ring-offset-2 focus-visible:ring-offset-white`}
       style={{
         left: `${placement.x * gridSize}px`,
         top: `${placement.y * gridSize}px`,
@@ -2532,21 +1751,32 @@ function DraggablePlacement({
         if (isDragging || shouldBlockClick?.()) return;
         onClick(event);
       }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onKeyActivate?.(event.currentTarget);
+        }
+        dragKeyDown?.(event);
+      }}
       {...dragListeners}
       {...dragAttributes}
     >
       <div className="flex flex-col items-center gap-0.5">
-        {placement.label && (
+        {placement.label && showSecondaryLabel && (
           <span className="text-xs font-semibold leading-none">
             {placement.label}
           </span>
         )}
-        <span className="text-xs font-medium leading-none">
-          {size.length}" x {size.width}"
-        </span>
-        <span className="text-[10px] font-medium leading-none opacity-90">
-          {colorLabel}
-        </span>
+        {showPrimaryLabel && (
+          <span className="text-xs font-medium leading-none">
+            {size.length}" x {size.width}"
+          </span>
+        )}
+        {showSecondaryLabel && (
+          <span className="text-[10px] font-medium leading-none opacity-90">
+            {colorLabel}
+          </span>
+        )}
       </div>
       <div className="absolute bottom-1 right-1 w-1.5 h-1.5 rounded-full bg-slate-300 opacity-0 group-hover:opacity-100" />
     </div>

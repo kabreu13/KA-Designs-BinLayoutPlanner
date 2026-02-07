@@ -1,7 +1,7 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { Button } from './ui/Button';
-import { Trash2, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import { Trash2, AlertCircle, ChevronDown, ChevronUp, CheckCircle, ShoppingCart } from 'lucide-react';
 import { useLayout } from '../context/LayoutContext';
 import { DEFAULT_BIN_COLOR, getColorLabel, normalizeHexColor } from '../utils/colors';
 import { BinSizePreview } from './BinSizePreview';
@@ -17,13 +17,21 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
     setDrawerSize,
     removePlacements,
     openPlacementEditor,
-    spaceUsedPercent
+    spaceUsedPercent,
+    exportState
   } = useLayout();
 
   const drawerArea = drawerWidth * drawerLength;
   const [status, setStatus] = useState<{ kind: 'info' | 'error'; text: string } | null>(null);
   const [isDrawerSettingsOpen, setIsDrawerSettingsOpen] = useState(true);
   const [drawerInputError, setDrawerInputError] = useState<{ width?: string; length?: string }>({});
+  const [resizeWarning, setResizeWarning] = useState<string | null>(null);
+  const [savedHint, setSavedHint] = useState(false);
+  const [drawerLengthDraft, setDrawerLengthDraft] = useState(String(drawerLength));
+  const [drawerWidthDraft, setDrawerWidthDraft] = useState(String(drawerWidth));
+  const hasMountedRef = useRef(false);
+  const drawerLengthInputRef = useRef<HTMLInputElement | null>(null);
+  const drawerWidthInputRef = useRef<HTMLInputElement | null>(null);
 
   const MIN_DRAWER_DIMENSION = 0.25;
   const MAX_DRAWER_DIMENSION = 200;
@@ -34,10 +42,36 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
   }, [status]);
 
   useEffect(() => {
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true;
+      return;
+    }
+    setSavedHint(true);
+    const id = window.setTimeout(() => setSavedHint(false), 1800);
+    return () => window.clearTimeout(id);
+  }, [layoutTitle, drawerWidth, drawerLength, placements]);
+
+  useEffect(() => {
+    if (!resizeWarning) return;
+    const id = window.setTimeout(() => setResizeWarning(null), 4000);
+    return () => window.clearTimeout(id);
+  }, [resizeWarning]);
+
+  useEffect(() => {
     if (!mobile) {
       setIsDrawerSettingsOpen(true);
     }
   }, [mobile]);
+
+  useEffect(() => {
+    if (typeof document !== 'undefined' && document.activeElement === drawerLengthInputRef.current) return;
+    setDrawerLengthDraft(String(drawerLength));
+  }, [drawerLength]);
+
+  useEffect(() => {
+    if (typeof document !== 'undefined' && document.activeElement === drawerWidthInputRef.current) return;
+    setDrawerWidthDraft(String(drawerWidth));
+  }, [drawerWidth]);
 
   const uniquePlacements = useMemo(() => {
     const seen = new Map<string, typeof placements[number]>();
@@ -87,6 +121,8 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
       }))
       .sort((a, b) => b.placements.length - a.placements.length);
   }, [uniquePlacements, bins]);
+
+  const hasEmptyPlacements = placementGroups.length === 0;
 
   const invalidCount = useMemo(() => {
     const invalid = new Set<string>();
@@ -142,10 +178,14 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
 
   const applyDrawerSize = (nextWidth: number, nextLength: number) => {
     if (placements.length > 0 && wouldInvalidateDrawerSize(nextWidth, nextLength)) {
-      setStatus({ kind: 'error', text: 'Resize would clip bins. Move or remove bins first.' });
-      return;
+      const warning = 'Resize would clip bins. Move or remove bins first.';
+      setResizeWarning(warning);
+      setStatus({ kind: 'error', text: warning });
+      return false;
     }
     setDrawerSize(nextWidth, nextLength);
+    setResizeWarning(null);
+    return true;
   };
 
   const validateDrawerInput = (raw: string, axis: 'width' | 'length') => {
@@ -169,6 +209,28 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
     return value;
   };
 
+  const commitDrawerLength = () => {
+    const nextLength = validateDrawerInput(drawerLengthDraft, 'length');
+    if (nextLength == null) return;
+    const applied = applyDrawerSize(drawerWidth, nextLength);
+    if (!applied) {
+      setDrawerLengthDraft(String(drawerLength));
+      return;
+    }
+    setDrawerLengthDraft(String(nextLength));
+  };
+
+  const commitDrawerWidth = () => {
+    const nextWidth = validateDrawerInput(drawerWidthDraft, 'width');
+    if (nextWidth == null) return;
+    const applied = applyDrawerSize(nextWidth, drawerLength);
+    if (!applied) {
+      setDrawerWidthDraft(String(drawerWidth));
+      return;
+    }
+    setDrawerWidthDraft(String(nextWidth));
+  };
+
   const etsyCartItems = useMemo(
     () =>
       placementGroups.map((group) => ({
@@ -184,6 +246,11 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
       share?: (data: ShareData) => Promise<void>;
       canShare?: (data?: ShareData) => boolean;
     };
+
+    if (import.meta.env.DEV && typeof window !== 'undefined' && (window as Window & { __forceExportPdfError?: boolean }).__forceExportPdfError) {
+      setStatus({ kind: 'error', text: 'Failed to export PDF' });
+      return;
+    }
 
     if (mobile && nav.share) {
       try {
@@ -208,9 +275,34 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
       }
     }
 
-    await exportLayoutToPdf(drawerWidth, drawerLength, placements, bins, layoutTitle);
-    if (mobile) {
-      setStatus({ kind: 'info', text: 'PDF downloaded' });
+    try {
+      await exportLayoutToPdf(drawerWidth, drawerLength, placements, bins, layoutTitle);
+      if (mobile) {
+        setStatus({ kind: 'info', text: 'PDF downloaded' });
+      }
+    } catch {
+      setStatus({ kind: 'error', text: 'Failed to export PDF' });
+    }
+  };
+
+  const copyShareLink = async () => {
+    try {
+      const state = exportState();
+      const encoded = encodeURIComponent(btoa(JSON.stringify(state)));
+      const link = `${window.location.origin}${window.location.pathname}?layout=${encoded}`;
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(link);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = link;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      setStatus({ kind: 'info', text: 'Share link copied' });
+    } catch {
+      setStatus({ kind: 'error', text: 'Failed to copy share link' });
     }
   };
 
@@ -220,6 +312,24 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
     tab?.click();
   };
 
+  const openCatalogPanel = () => {
+    if (mobile || typeof document === 'undefined') return;
+    const expandButton = document.querySelector(
+      'button[aria-label="Expand Bin catalog"]'
+    ) as HTMLButtonElement | null;
+    expandButton?.click();
+    const panel = document.getElementById('bin-catalog-panel');
+    panel?.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleOpenCatalog = () => {
+    if (mobile) {
+      openCatalogTab();
+      return;
+    }
+    openCatalogPanel();
+  };
+
   return (
     <div
       className={`bg-white flex flex-col h-full ${
@@ -227,6 +337,16 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
       }`}
     >
       <div className={`${mobile ? 'p-4' : 'p-6'} border-b border-slate-900/[0.06] space-y-4`}>
+        {mobile && hasEmptyPlacements && (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleOpenCatalog}
+            className="w-full min-h-11"
+          >
+            Add bins from Catalog
+          </Button>
+        )}
         {mobile ? (
           <button
             type="button"
@@ -254,18 +374,24 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
               <div>
                 <label className="text-xs text-slate-400 mb-1 block">Length (in)</label>
                 <input
+                  ref={drawerLengthInputRef}
                   type="number"
                   min={MIN_DRAWER_DIMENSION}
                   step={0.25}
                   aria-label="Drawer length"
                   data-testid="drawer-length-input"
-                  value={drawerLength}
+                  value={drawerLengthDraft}
                   aria-invalid={Boolean(drawerInputError.length)}
                   aria-describedby={drawerInputError.length ? 'drawer-length-error' : undefined}
                   onChange={(e) => {
-                    const nextValue = validateDrawerInput(e.target.value, 'length');
-                    if (nextValue == null) return;
-                    applyDrawerSize(drawerWidth, nextValue);
+                    setDrawerLengthDraft(e.target.value);
+                    setDrawerInputError((prev) => ({ ...prev, length: undefined }));
+                  }}
+                  onBlur={commitDrawerLength}
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Enter') return;
+                    commitDrawerLength();
+                    e.currentTarget.blur();
                   }}
                   className={`w-full bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-[#0B0B0C] focus:outline-none focus:ring-2 focus:ring-[#14476B]/20 ${
                     mobile ? 'p-3 min-h-11' : 'p-2'
@@ -280,18 +406,24 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
               <div>
                 <label className="text-xs text-slate-400 mb-1 block">Width (in)</label>
                 <input
+                  ref={drawerWidthInputRef}
                   type="number"
                   min={MIN_DRAWER_DIMENSION}
                   step={0.25}
                   aria-label="Drawer width"
                   data-testid="drawer-width-input"
-                  value={drawerWidth}
+                  value={drawerWidthDraft}
                   aria-invalid={Boolean(drawerInputError.width)}
                   aria-describedby={drawerInputError.width ? 'drawer-width-error' : undefined}
                   onChange={(e) => {
-                    const nextValue = validateDrawerInput(e.target.value, 'width');
-                    if (nextValue == null) return;
-                    applyDrawerSize(nextValue, drawerLength);
+                    setDrawerWidthDraft(e.target.value);
+                    setDrawerInputError((prev) => ({ ...prev, width: undefined }));
+                  }}
+                  onBlur={commitDrawerWidth}
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Enter') return;
+                    commitDrawerWidth();
+                    e.currentTarget.blur();
                   }}
                   className={`w-full bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-[#0B0B0C] focus:outline-none focus:ring-2 focus:ring-[#14476B]/20 ${
                     mobile ? 'p-3 min-h-11' : 'p-2'
@@ -307,13 +439,13 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
 
             <div className="space-y-2">
               <div className="flex justify-between text-xs">
-                <span className="text-slate-500">Space Used</span>
-                <span className="font-medium text-[#14476B]">{spaceUsedPercent.toFixed(0)}%</span>
+                <span className="text-slate-600">Space Used</span>
+                <span className="font-semibold text-[#14476B]">{spaceUsedPercent.toFixed(0)}%</span>
               </div>
-              <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+              <div className="h-2 w-full bg-slate-200 rounded-full overflow-hidden">
                 <div className="h-full bg-[#14476B]" style={{ width: `${spaceUsedPercent}%` }} />
               </div>
-              <p className="text-xs text-slate-400 flex items-center gap-1 mt-2">
+              <p className="text-xs text-slate-500 flex items-center gap-1 mt-2">
                 <AlertCircle className="h-3 w-3" />
                 {uniquePlacements.length} bins placed · Drawer area {drawerArea.toFixed(0)} in²
               </p>
@@ -327,6 +459,15 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
                   ? 'All bins safely placed.'
                   : `${invalidCount} bin${invalidCount === 1 ? '' : 's'} need attention.`}
               </p>
+              {resizeWarning && (
+                <div
+                  role="alert"
+                  className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5 flex items-center gap-1"
+                >
+                  <AlertCircle className="h-3 w-3" />
+                  {resizeWarning}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -337,17 +478,18 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
           Placed Items
         </h3>
         <div className="space-y-3">
-          {placementGroups.length === 0 && (
-            <div className="text-sm text-slate-400 space-y-2">
+          {hasEmptyPlacements && (
+            <div className="text-sm text-slate-500 space-y-3">
               <p>No bins placed yet.</p>
-              {mobile && (
-                <button
-                  type="button"
-                  onClick={openCatalogTab}
-                  className="text-xs font-semibold uppercase tracking-wide text-[#14476B] hover:text-[#1a5a8a]"
+              {!mobile && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={handleOpenCatalog}
+                  className="w-full"
                 >
-                  Open Catalog
-                </button>
+                  Add bins from Catalog
+                </Button>
               )}
             </div>
           )}
@@ -394,8 +536,14 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
                 </button>
                 <button
                   type="button"
+                  data-testid="placed-item-delete-button"
                   aria-label={`Delete ${group.placements.length} bin${group.placements.length === 1 ? '' : 's'}`}
-                  className={`text-slate-300 hover:text-red-500 transition-colors ${mobile ? 'min-h-11 min-w-11' : ''}`}
+                  title="Delete group"
+                  className={`text-slate-400 hover:text-red-500 transition-all flex items-center gap-1 rounded-md px-1 ${
+                    mobile
+                      ? 'min-h-11 min-w-11 opacity-100'
+                      : 'min-h-8 opacity-0 translate-x-1 group-hover:opacity-100 group-hover:translate-x-0 group-focus-within:opacity-100 group-focus-within:translate-x-0 focus-visible:opacity-100 focus-visible:translate-x-0'
+                  }`}
                   onClick={(event) => {
                     event.stopPropagation();
                     removePlacements(group.placements.map((placement) => placement.id));
@@ -406,6 +554,9 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
                   }}
                 >
                   <Trash2 className="h-4 w-4" />
+                  <span className="text-[11px] font-semibold text-slate-400 group-hover:text-red-500 transition-colors">
+                    Delete All
+                  </span>
                 </button>
               </div>
             );
@@ -414,6 +565,12 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
       </div>
 
       <div className={`${mobile ? 'p-4' : 'p-6'} bg-slate-50 border-t border-slate-900/[0.06] space-y-4`}>
+        {savedHint && (
+          <div className="flex items-center justify-center gap-1 text-xs font-semibold text-emerald-700">
+            <CheckCircle className="h-3 w-3" />
+            Saved
+          </div>
+        )}
         <div className={`grid ${mobile ? 'grid-cols-1' : 'grid-cols-2'} gap-3`}>
           <Button
             variant="secondary"
@@ -422,6 +579,14 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
             onClick={exportPdf}
           >
             {mobile ? 'Share PDF' : 'Export PDF'}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            className={`w-full text-xs ${mobile ? 'min-h-11' : ''}`}
+            onClick={copyShareLink}
+          >
+            Copy Share Link
           </Button>
           {/* <Button
             variant="secondary"
@@ -472,7 +637,7 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
           <Button
             variant="secondary"
             size="sm"
-            className={`w-full text-xs ${mobile ? 'min-h-11' : ''}`}
+            className={`w-full text-xs ${mobile ? 'min-h-11' : 'col-span-2'} !text-white !border-0 !bg-gradient-to-r !from-[#F97316] !via-[#EA580C] !to-[#C2410C] shadow-md hover:shadow-lg hover:brightness-105`}
             onClick={() => {
               const cart = buildEtsyCartUrl(etsyCartItems);
               if (cart.missingListingId) {
@@ -497,6 +662,7 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
               setStatus({ kind: 'info', text: 'Opened Etsy cart link' });
             }}
             disabled={etsyCartItems.length === 0}
+            leftIcon={<ShoppingCart className="h-3.5 w-3.5" />}
           >
             Open Etsy Cart
           </Button>

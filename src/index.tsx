@@ -1,5 +1,5 @@
 import './index.css';
-import { render } from "react-dom";
+import { createRoot } from "react-dom/client";
 import { injectSpeedInsights } from "@vercel/speed-insights";
 import { App } from "./App";
 
@@ -47,4 +47,8 @@ const initGoogleAnalytics = () => {
 initGoogleAnalytics();
 injectSpeedInsights();
 
-render(<App />, document.getElementById("root"));
+const rootElement = document.getElementById("root");
+if (!rootElement) {
+  throw new Error('Root element not found');
+}
+createRoot(rootElement).render(<App />);

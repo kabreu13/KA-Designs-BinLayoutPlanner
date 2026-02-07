@@ -1,9 +1,9 @@
 import { expect, type Page } from '@playwright/test';
 
 export const dismissHowTo = async (page: Page) => {
-  const howTo = page.getByTestId('canvas-how-to');
+  const howTo = page.getByTestId('how-to-modal');
   if (await howTo.isVisible().catch(() => false)) {
-    await howTo.getByRole('button', { name: 'Hide' }).click();
+    await howTo.getByRole('button', { name: 'Close how to' }).click();
   }
 };
 

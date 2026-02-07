@@ -1,6 +1,6 @@
 import './coverage';
 import { test, expect } from '@playwright/test';
-import { dismissHowTo } from './helpers';
+import { dismissHowTo, ensureCatalogExpanded } from './helpers';
 
 test('@smoke grid toggle shows/hides overlay', async ({ page }) => {
   await page.goto('/');
@@ -26,4 +26,17 @@ test('snap input updates value', async ({ page }) => {
   await expect(snapInput).toHaveValue('0.5');
   await snapInput.fill('1.5');
   await expect(snapInput).toHaveValue('1.5');
+});
+
+test('paint mode shows persistent chip and exits from chip', async ({ page }) => {
+  await page.goto('/');
+  await ensureCatalogExpanded(page);
+  await dismissHowTo(page);
+
+  await page.locator('[data-testid="bin-card"]').first().click();
+  await page.getByTestId('paint-mode-toggle').click();
+  await expect(page.getByTestId('paint-mode-chip')).toBeVisible();
+
+  await page.getByTestId('paint-mode-chip').click();
+  await expect(page.getByTestId('paint-mode-chip')).toHaveCount(0);
 });

@@ -3,11 +3,11 @@ import { test, expect } from '@playwright/test';
 import { ensureCatalogExpanded, getStoredPlacements } from './helpers';
 
 const dismissHowToIfVisible = async (page: import('@playwright/test').Page) => {
-  const howTo = page.getByTestId('canvas-how-to');
+  const howTo = page.getByTestId('how-to-modal');
   if ((await howTo.count()) === 0) return;
-  const hideButton = howTo.getByRole('button', { name: 'Hide' });
-  if (await hideButton.isVisible()) {
-    await hideButton.click();
+  const closeButton = howTo.getByRole('button', { name: 'Close how to' });
+  if (await closeButton.isVisible()) {
+    await closeButton.click();
   }
 };
 
@@ -28,7 +28,7 @@ test('placed bin editor updates label, color, and size', async ({ page }) => {
   await labelInput.fill('Spice');
   await labelInput.blur();
   await expect.poll(async () => (await getStoredPlacements(page))[0]?.label).toBe('Spice');
-  await expect(placed).toContainText('Spice');
+  await expect(placed).toHaveAttribute('aria-label', /Spice/);
 
   const colorInput = page.getByTestId('placement-color');
   await colorInput.selectOption('#dc2626');
@@ -51,14 +51,19 @@ test('resize blocks out-of-bounds bins and shows a toast', async ({ page }) => {
   await ensureCatalogExpanded(page);
   await dismissHowToIfVisible(page);
 
-  await page.getByTestId('drawer-width-input').fill('4');
-  await page.getByTestId('drawer-length-input').fill('4');
+  const widthInput = page.getByTestId('drawer-width-input');
+  await widthInput.fill('4');
+  await widthInput.blur();
+  const lengthInput = page.getByTestId('drawer-length-input');
+  await lengthInput.fill('4');
+  await lengthInput.blur();
 
   await page.locator('[data-testid="bin-card"]').first().click();
   const placed = page.getByTestId('placed-bin').first();
   await placed.waitFor({ state: 'visible' });
 
   await placed.click();
+  await page.getByTestId('size-width-increase').click();
   await page.getByTestId('size-width-increase').click();
   await page.getByTestId('size-width-increase').click();
 
@@ -70,7 +75,9 @@ test('resize blocks out-of-bounds bins and shows a toast', async ({ page }) => {
     return placements[0]?.width;
   }).toBe(4);
 
-  await expect(page.getByText('Cannot resize — would overlap or exceed drawer.')).toBeVisible();
+  await expect(
+    page.getByTestId('placement-editor').getByText('Cannot resize — would overlap or exceed drawer.')
+  ).toBeVisible();
 });
 
 test('resize blocks overlapping bins and shows a toast', async ({ page }) => {
@@ -97,6 +104,7 @@ test('resize blocks overlapping bins and shows a toast', async ({ page }) => {
   await placed.first().click();
   await page.getByTestId('size-width-increase').click();
   await page.getByTestId('size-width-increase').click();
+  await page.getByTestId('size-width-increase').click();
 
   await expect.poll(async () => {
     const placements = await page.evaluate(() => {
@@ -107,5 +115,7 @@ test('resize blocks overlapping bins and shows a toast', async ({ page }) => {
     return resized?.width;
   }).toBe(4);
 
-  await expect(page.getByText('Cannot resize — would overlap or exceed drawer.')).toBeVisible();
+  await expect(
+    page.getByTestId('placement-editor').getByText('Cannot resize — would overlap or exceed drawer.')
+  ).toBeVisible();
 });

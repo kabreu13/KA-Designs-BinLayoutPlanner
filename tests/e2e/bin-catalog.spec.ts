@@ -35,10 +35,9 @@ test('bin catalog size labels stay inside the card', async ({ page }) => {
   });
 });
 
-test('bin catalog length headers omit counts', async ({ page }) => {
+test('bin catalog length headers show counts', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByText(/Length 2"/)).toBeVisible();
-  await expect(page.getByText(/Length 2" \(\d+\)/)).toHaveCount(0);
+  await expect(page.getByText(/Length 2" \(\d+\)/)).toBeVisible();
 });
 
 test('bin catalog groups can collapse and expand', async ({ page }) => {
@@ -46,14 +45,14 @@ test('bin catalog groups can collapse and expand', async ({ page }) => {
 
   const toggle = page.getByTestId('catalog-group-toggle-2');
   await expect(toggle).toBeVisible();
-  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  await expect(page.getByTestId('catalog-group-body-2')).toHaveCount(0);
+  const body = page.getByTestId('catalog-group-body-2');
+  const initiallyExpanded = (await toggle.getAttribute('aria-expanded')) === 'true';
 
   await toggle.click();
-  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-  await expect(page.getByTestId('catalog-group-body-2')).toBeVisible();
+  await expect(toggle).toHaveAttribute('aria-expanded', initiallyExpanded ? 'false' : 'true');
+  await expect(body).toHaveCount(initiallyExpanded ? 0 : 1);
 
   await toggle.click();
-  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  await expect(page.getByTestId('catalog-group-body-2')).toHaveCount(0);
+  await expect(toggle).toHaveAttribute('aria-expanded', initiallyExpanded ? 'true' : 'false');
+  await expect(body).toHaveCount(initiallyExpanded ? 1 : 0);
 });

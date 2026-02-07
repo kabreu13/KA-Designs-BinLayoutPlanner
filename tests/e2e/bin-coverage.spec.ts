@@ -11,8 +11,12 @@ const binsById = new Map(BINS.map((bin) => [bin.id, bin]));
 type Placement = { id: string; binId: string; x: number; y: number };
 
 const setDrawerSize = async (page: import('@playwright/test').Page, width: number, length: number) => {
-  await page.getByTestId('drawer-width-input').fill(String(width));
-  await page.getByTestId('drawer-length-input').fill(String(length));
+  const widthInput = page.getByTestId('drawer-width-input');
+  await widthInput.fill(String(width));
+  await widthInput.blur();
+  const lengthInput = page.getByTestId('drawer-length-input');
+  await lengthInput.fill(String(length));
+  await lengthInput.blur();
 };
 
 test('blocked placement when drawer is full', async ({ page }) => {
