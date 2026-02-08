@@ -169,13 +169,24 @@ test('snap pulls bins to drawer borders', async ({ page }) => {
   const placed = page.locator(PLACED).first();
   await placed.waitFor({ state: 'visible' });
 
+  const initial = (await getStoredPlacements(page)) as Placement[];
+  const initialPlacement = initial[0];
+  const bin = binsById.get(initialPlacement.binId);
+  if (!bin) throw new Error(`Missing bin metadata for ${initialPlacement.binId}`);
+
   const box = await placed.boundingBox();
   if (!box) throw new Error('Missing placed bin bounding box');
+  const pixelsPerInchX = box.width / bin.width;
+  const pixelsPerInchY = box.height / bin.length;
 
-  // Move to x=1 inch (25px); should snap back to 0.
+  // Move to x=1 inch; should snap back to 0.
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
-  await page.mouse.move(box.x + box.width / 2 + 25, box.y + box.height / 2, { steps: 10 });
+  await page.mouse.move(
+    box.x + box.width / 2 + pixelsPerInchX,
+    box.y + box.height / 2,
+    { steps: 10 }
+  );
   await page.mouse.up();
 
   const after = (await getStoredPlacements(page)) as Placement[];
@@ -183,13 +194,26 @@ test('snap pulls bins to drawer borders', async ({ page }) => {
 
   const box2 = await placed.boundingBox();
   if (!box2) throw new Error('Missing placed bin bounding box');
+  const pixelsPerInchXAfter = box2.width / bin.width;
+  const pixelsPerInchYAfter = box2.height / bin.length;
   // Move near the right/bottom edges; should snap to max bounds.
+  const snapValue = 2;
+  const maxX = 6 - bin.width;
+  const maxY = 6 - bin.length;
+  const targetX = Math.min(maxX, snapValue + 0.25);
+  const targetY = Math.min(maxY, snapValue + 0.25);
+  const deltaX = (targetX - (after[0]?.x ?? 0)) * pixelsPerInchXAfter;
+  const deltaY = (targetY - (after[0]?.y ?? 0)) * pixelsPerInchYAfter;
   await page.mouse.move(box2.x + box2.width / 2, box2.y + box2.height / 2);
   await page.mouse.down();
-  await page.mouse.move(box2.x + box2.width / 2 + 75, box2.y + box2.height / 2 + 75, { steps: 10 });
+  await page.mouse.move(
+    box2.x + box2.width / 2 + deltaX,
+    box2.y + box2.height / 2 + deltaY,
+    { steps: 10 }
+  );
   await page.mouse.up();
 
   const end = (await getStoredPlacements(page)) as Placement[];
-  expect(end[0]?.x).toBeCloseTo(4, 1);
-  expect(end[0]?.y).toBeCloseTo(4, 1);
+  expect(end[0]?.x).toBeCloseTo(maxX, 1);
+  expect(end[0]?.y).toBeCloseTo(maxY, 1);
 });
