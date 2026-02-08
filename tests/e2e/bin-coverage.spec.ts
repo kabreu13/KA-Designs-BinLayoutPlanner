@@ -177,7 +177,6 @@ test('snap pulls bins to drawer borders', async ({ page }) => {
   const box = await placed.boundingBox();
   if (!box) throw new Error('Missing placed bin bounding box');
   const pixelsPerInchX = box.width / bin.width;
-  const pixelsPerInchY = box.height / bin.length;
 
   // Move to x=1 inch; should snap back to 0.
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
