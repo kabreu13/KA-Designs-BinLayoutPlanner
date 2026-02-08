@@ -6,11 +6,19 @@ import istanbul from 'vite-plugin-istanbul';
 
 // https://vitejs.dev/config/
 const enableE2eCoverage = process.env.E2E_COVERAGE === '1';
+const enableBundleAnalysis = process.env.ANALYZE === '1';
 
 export default defineConfig({
   plugins: [
     react(),
-    visualizer({ filename: 'dist/stats.html', gzipSize: true, brotliSize: true, template: 'treemap', emitFile: true }),
+    enableBundleAnalysis &&
+      visualizer({
+        filename: 'dist/stats.html',
+        gzipSize: true,
+        brotliSize: true,
+        template: 'treemap',
+        emitFile: true
+      }),
     enableE2eCoverage &&
       istanbul({
         include: 'src/**/*',

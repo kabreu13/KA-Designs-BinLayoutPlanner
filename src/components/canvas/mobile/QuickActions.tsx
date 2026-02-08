@@ -1,4 +1,6 @@
 import type { MutableRefObject } from 'react';
+import clsx from 'clsx';
+import { cva } from 'class-variance-authority';
 import {
   ChevronDown,
   ChevronUp,
@@ -14,6 +16,43 @@ import {
 } from 'lucide-react';
 import { Button } from '../../ui/Button';
 import { CUSTOM_COLOR_VALUE, PRESET_COLORS } from '../../../utils/colors';
+import styles from './QuickActions.module.css';
+
+const panelStateClassName = cva('', {
+  variants: {
+    paintMode: {
+      true: styles.panelPaintMode,
+      false: ''
+    }
+  }
+});
+
+const interactivityClassName = cva('', {
+  variants: {
+    enabled: {
+      true: styles.pointerEnabled,
+      false: styles.pointerDisabled
+    }
+  }
+});
+
+const gridButtonStateClassName = cva('', {
+  variants: {
+    pressed: {
+      true: styles.gridButtonPressed,
+      false: styles.gridButtonIdle
+    }
+  }
+});
+
+const paintModeButtonStateClassName = cva('', {
+  variants: {
+    active: {
+      true: styles.paintToggleActive,
+      false: styles.paintToggleIdle
+    }
+  }
+});
 
 type MobileQuickActionsProps = {
   isOpen: boolean;
@@ -100,10 +139,10 @@ export function MobileQuickActions({
         title="Expand quick actions"
         tabIndex={quickActionsTabIndex}
         onClick={onExpand}
-        className="absolute top-3 right-3 z-50 rounded-full border border-slate-200 bg-white/95 backdrop-blur shadow-md text-slate-700 flex items-center gap-2 px-3 h-11"
+        className={styles.collapsedToggle}
       >
-        <ChevronUp className="h-4 w-4" />
-        <span className="text-xs font-semibold uppercase tracking-wide">Actions</span>
+        <ChevronUp className={styles.iconMd} />
+        <span className={styles.collapsedToggleLabel}>Actions</span>
       </button>
     );
   }
@@ -111,18 +150,14 @@ export function MobileQuickActions({
   return (
     <div
       data-tour="quick-actions-pill"
-      className={`absolute left-2 right-2 top-3 bg-white/90 backdrop-blur shadow-lg border border-slate-200 rounded-2xl px-3 py-2 flex flex-col gap-3 z-50 pointer-events-none ${
-        paintMode ? 'pb-4' : ''
-      }`}
+      className={clsx(styles.panel, panelStateClassName({ paintMode }))}
     >
       <div
-        className={`flex flex-wrap items-center justify-center gap-4 ${
-          disableQuickActions ? 'pointer-events-none' : 'pointer-events-auto'
-        }`}
+        className={clsx(styles.section, interactivityClassName({ enabled: !disableQuickActions }))}
       >
-        <div className="flex flex-col items-center gap-1">
-          <span className="text-xs uppercase tracking-wide text-slate-400">History</span>
-          <div className="flex items-center gap-1">
+        <div className={styles.group}>
+          <span className={styles.label}>History</span>
+          <div className={styles.row}>
             <button
               type="button"
               onClick={onUndo}
@@ -131,9 +166,9 @@ export function MobileQuickActions({
               aria-label="Undo"
               data-quick-actions-start
               tabIndex={quickActionsTabIndex}
-              className="hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600 h-11 w-11"
+              className={styles.iconButton}
             >
-              <RotateCcw className="h-4 w-4" />
+              <RotateCcw className={styles.iconMd} />
             </button>
             <button
               type="button"
@@ -142,35 +177,31 @@ export function MobileQuickActions({
               title="Redo (Shift+Ctrl/Cmd+Z)"
               aria-label="Redo"
               tabIndex={quickActionsTabIndex}
-              className="hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600 h-11 w-11"
+              className={styles.iconButton}
             >
-              <RotateCw className="h-4 w-4" />
+              <RotateCw className={styles.iconMd} />
             </button>
           </div>
         </div>
 
-        <div className="flex flex-col items-center gap-1">
-          <span className="text-xs uppercase tracking-wide text-slate-400">Grid</span>
+        <div className={styles.group}>
+          <span className={styles.label}>Grid</span>
           <button
             onClick={onToggleGrid}
             title="Toggle grid (G)"
             aria-label="Toggle grid"
             aria-pressed={showGrid}
             tabIndex={quickActionsTabIndex}
-            className={`rounded-full transition-colors h-11 w-11 border ${
-              showGrid
-                ? 'bg-[#14476B]/10 text-[#14476B] border-[#14476B]/30'
-                : 'border-transparent hover:border-slate-200 hover:bg-slate-100 text-slate-600'
-            }`}
+            className={clsx(styles.iconButton, gridButtonStateClassName({ pressed: showGrid }))}
           >
-            <Grid className="h-4 w-4" />
+            <Grid className={styles.iconMd} />
           </button>
         </div>
 
         {!isMini && (
-          <div className="flex flex-col items-center gap-1">
-            <span className="text-xs uppercase tracking-wide text-slate-400">Snap</span>
-            <div className="flex items-center gap-1">
+          <div className={styles.group}>
+            <span className={styles.label}>Snap</span>
+            <div className={styles.row}>
               <input
                 ref={snapInputRef}
                 aria-label="Snap to grid"
@@ -186,12 +217,12 @@ export function MobileQuickActions({
                 aria-invalid={Boolean(snapHelper)}
                 aria-describedby={snapHelper ? 'snap-helper' : undefined}
                 tabIndex={quickActionsTabIndex}
-                className="w-14 px-2 py-2 min-h-10 text-xs rounded-md border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#14476B]/20"
+                className={styles.snapInput}
               />
-              <span className="text-[10px] text-slate-400">in</span>
+              <span className={styles.unit}>in</span>
             </div>
             {snapHelper && (
-              <span id="snap-helper" className="text-[10px] text-amber-600">
+              <span id="snap-helper" className={styles.helper}>
                 {snapHelper}
               </span>
             )}
@@ -199,9 +230,9 @@ export function MobileQuickActions({
         )}
 
         {!isMini && (
-          <div className="flex flex-col items-center gap-1">
-            <span className="text-xs uppercase tracking-wide text-slate-400">View</span>
-            <div className="flex items-center gap-1">
+          <div className={styles.group}>
+            <span className={styles.label}>View</span>
+            <div className={styles.row}>
               <button
                 type="button"
                 aria-label="Zoom out"
@@ -209,11 +240,11 @@ export function MobileQuickActions({
                 disabled={!canZoomOut}
                 onClick={onZoomOut}
                 tabIndex={quickActionsTabIndex}
-                className="hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600 h-11 w-11"
+                className={styles.iconButton}
               >
-                <ZoomOut className="h-4 w-4" />
+                <ZoomOut className={styles.iconMd} />
               </button>
-              <span className="w-12 text-center text-xs font-medium text-slate-600">
+              <span className={styles.zoomValue}>
                 <span data-testid="canvas-zoom-value">{canvasZoomPercent}%</span>
               </span>
               <button
@@ -223,9 +254,9 @@ export function MobileQuickActions({
                 disabled={!canZoomIn}
                 onClick={onZoomIn}
                 tabIndex={quickActionsTabIndex}
-                className="hover:bg-slate-100 disabled:opacity-40 rounded-full text-slate-600 h-11 w-11"
+                className={styles.iconButton}
               >
-                <ZoomIn className="h-4 w-4" />
+                <ZoomIn className={styles.iconMd} />
               </button>
               <Button
                 data-testid="home-canvas-button"
@@ -234,8 +265,8 @@ export function MobileQuickActions({
                 title={`Home canvas (${homeZoomPercent}%)`}
                 aria-label={`Home canvas ${homeZoomPercent}%`}
                 tabIndex={quickActionsTabIndex}
-                className="min-h-10 px-3 text-slate-700"
-                leftIcon={<House className="h-3 w-3" />}
+                className={styles.homeButton}
+                leftIcon={<House className={styles.iconSm} />}
                 onClick={onHomeCanvas}
               >
                 {`Home ${homeZoomPercent}%`}
@@ -247,19 +278,21 @@ export function MobileQuickActions({
 
       {!isMini && (
         <div
-          className={`flex flex-wrap items-center justify-center gap-3 ${
-            disableQuickActions ? 'pointer-events-none' : 'pointer-events-auto'
-          }`}
+          className={clsx(
+            styles.section,
+            styles.layoutSection,
+            interactivityClassName({ enabled: !disableQuickActions })
+          )}
         >
-          <div data-tour="canvas-actions" className="flex flex-col items-center gap-1">
-            <span className="text-xs uppercase tracking-wide text-slate-400">Layout</span>
-            <div className="flex flex-wrap items-center justify-center gap-2">
+          <div data-tour="canvas-actions" className={styles.group}>
+            <span className={styles.label}>Layout</span>
+            <div className={clsx(styles.row, styles.layoutRow)}>
               <Button
                 data-testid="suggest-layout-button"
                 size="sm"
                 variant="ghost"
-                className="text-[#14476B] min-h-10 px-3"
-                leftIcon={<Sparkles className="h-3 w-3" />}
+                className={styles.suggestButton}
+                leftIcon={<Sparkles className={styles.iconSm} />}
                 title={layoutControlsDisabled ? 'Add a bin to enable suggest layout' : 'Suggest layout (S)'}
                 tabIndex={quickActionsTabIndex}
                 onClick={onSuggestLayout}
@@ -271,8 +304,8 @@ export function MobileQuickActions({
                 data-testid="clear-layout-button"
                 size="sm"
                 variant="ghost"
-                className="text-slate-600 min-h-10 px-3"
-                leftIcon={<Trash2 className="h-3 w-3" />}
+                className={styles.clearButton}
+                leftIcon={<Trash2 className={styles.iconSm} />}
                 title={layoutControlsDisabled ? 'Add a bin to enable clear' : 'Clear layout (C)'}
                 tabIndex={quickActionsTabIndex}
                 onClick={onClearLayout}
@@ -280,14 +313,17 @@ export function MobileQuickActions({
               >
                 Clear
               </Button>
-              <div className="flex flex-col items-center gap-1">
+              <div className={styles.paintStack}>
                 <Button
                   data-testid="paint-mode-toggle"
                   data-tour="paint-action"
                   size="sm"
                   variant="ghost"
-                  className={`${paintMode ? 'text-[#14476B] bg-[#14476B]/10 border border-[#14476B]/30' : 'text-slate-600 border border-transparent hover:border-slate-200'} min-h-10 px-3`}
-                  leftIcon={<PaintBucket className="h-3 w-3" />}
+                  className={clsx(
+                    styles.paintToggleBase,
+                    paintModeButtonStateClassName({ active: paintMode })
+                  )}
+                  leftIcon={<PaintBucket className={styles.iconSm} />}
                   onClick={onTogglePaintMode}
                   aria-label={paintMode ? 'Disable paint mode' : 'Enable paint mode'}
                   aria-pressed={paintMode}
@@ -303,7 +339,7 @@ export function MobileQuickActions({
                     onChange={(event) => onPaintColorSelectionChange(event.target.value)}
                     aria-label="Paint color"
                     tabIndex={quickActionsTabIndex}
-                    className="w-28 rounded-md border border-slate-200 px-2 py-2 min-h-10 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#14476B]/20"
+                    className={styles.paintSelect}
                   >
                     {PRESET_COLORS.map((option) => (
                       <option key={option.value} value={option.value}>
@@ -321,30 +357,28 @@ export function MobileQuickActions({
                     value={paintColorDraft}
                     onChange={(event) => onPaintColorChange(event.target.value)}
                     tabIndex={quickActionsTabIndex}
-                    className="h-7 w-10 rounded-md border border-slate-200 bg-white"
+                    className={styles.customColorInput}
                   />
                 )}
               </div>
             </div>
             {layoutControlsDisabled && (
-              <div className="text-xs text-slate-400">Add a bin to enable layout tools.</div>
+              <div className={styles.layoutHint}>Add a bin to enable layout tools.</div>
             )}
           </div>
         </div>
       )}
 
       <div
-        className={`flex items-center gap-2 ${
-          disableQuickActions ? 'pointer-events-none' : 'pointer-events-auto'
-        }`}
+        className={clsx(styles.footer, interactivityClassName({ enabled: !disableQuickActions }))}
       >
         <button
           type="button"
           onClick={onToggleSize}
           tabIndex={quickActionsTabIndex}
-          className="rounded-full text-slate-600 hover:bg-slate-100 flex items-center justify-center gap-1 h-11 px-3"
+          className={styles.footerButton}
         >
-          <span className="text-xs font-semibold uppercase tracking-wide">
+          <span className={styles.footerLabel}>
             {isMini ? 'More' : 'Less'}
           </span>
         </button>
@@ -356,10 +390,10 @@ export function MobileQuickActions({
           title="Collapse quick actions"
           onClick={onCollapse}
           tabIndex={quickActionsTabIndex}
-          className="rounded-full text-slate-600 hover:bg-slate-100 flex items-center justify-center gap-1 h-11 px-3"
+          className={styles.footerButton}
         >
-          <ChevronDown className="h-4 w-4" />
-          <span className="text-xs font-semibold uppercase tracking-wide">Hide</span>
+          <ChevronDown className={styles.iconMd} />
+          <span className={styles.footerLabel}>Hide</span>
         </button>
       </div>
     </div>

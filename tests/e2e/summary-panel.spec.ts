@@ -23,15 +23,15 @@ test('@smoke space used bar increases with placements', async ({ page }) => {
   await page.goto('/');
   await ensureCatalogExpanded(page);
 
-  const bar = page.locator('div.h-2 > div.h-full');
-  const beforeWidth = await bar.getAttribute('style');
+  const barFill = page.getByTestId('space-used-bar-fill');
+  const beforeWidth = await barFill.getAttribute('style');
 
   const binCard = page.locator(BIN_CARD).first();
   await binCard.waitFor({ state: 'visible' });
   await binCard.click();
   await binCard.click();
 
-  const afterWidth = await bar.getAttribute('style');
+  const afterWidth = await barFill.getAttribute('style');
   expect(beforeWidth).not.toBe(afterWidth);
   await expect(page.getByText(/bins placed/)).toBeVisible();
 });

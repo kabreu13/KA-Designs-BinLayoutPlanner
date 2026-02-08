@@ -50,6 +50,10 @@ jobs:
         if: steps.vercel-secrets.outputs.ready == 'true'
         run: npm ci
 
+      - name: Verify (deploy)
+        if: steps.vercel-secrets.outputs.ready == 'true'
+        run: npm run verify:deploy
+
       - name: Pull Vercel project settings
         if: steps.vercel-secrets.outputs.ready == 'true'
         run: npx vercel pull --yes --environment=production --token="$VERCEL_TOKEN"

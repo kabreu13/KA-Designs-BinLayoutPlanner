@@ -1,0 +1,20 @@
+.card {
+  background: var(--canvas-color-surface);
+  border-radius: var(--canvas-radius-md);
+  border: 1px solid rgb(15 23 42 / 6%);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 10%);
+}
+
+.hoverable {
+  transition: all 0.2s ease;
+}
+
+.hoverable:hover {
+  box-shadow: var(--canvas-shadow-md);
+  transform: translateY(-2px);
+  border-color: rgb(15 23 42 / 10%);
+}
+
+.padded {
+  padding: 1.5rem;
+}

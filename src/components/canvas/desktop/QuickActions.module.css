@@ -1,0 +1,217 @@
+.quickActionsRoot {
+  position: absolute;
+  top: 1rem;
+  right: 0;
+  left: 0;
+  z-index: 50;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  padding: 0 1rem;
+}
+
+.quickActionsPill {
+  background: var(--canvas-color-surface-frost);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--canvas-color-border);
+  border-radius: var(--canvas-radius-lg);
+  padding: 0.5rem 0.75rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  max-width: min(1100px, 100%);
+  overflow: visible;
+}
+
+.quickActionsPillPaintMode {
+  padding-bottom: 1rem;
+}
+
+.quickActionsPillInteractive {
+  pointer-events: auto;
+}
+
+.quickActionsPillDisabled {
+  pointer-events: none;
+}
+
+.groups {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: center;
+  column-gap: 0.5rem;
+  row-gap: 0.5rem;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--canvas-color-text-muted);
+  line-height: 1;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.iconButton {
+  border-radius: var(--canvas-radius-pill);
+  color: var(--canvas-color-text-secondary);
+  padding: 0.5rem;
+  border: 1px solid transparent;
+  background: transparent;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.iconButton:hover:not(:disabled) {
+  background: var(--canvas-color-surface-hover);
+}
+
+.iconButton:focus-visible {
+  outline: none;
+  box-shadow: var(--canvas-focus-ring);
+}
+
+.iconButton:disabled {
+  opacity: 0.4;
+}
+
+.gridButtonPressed {
+  background: var(--canvas-color-brand-soft);
+  color: var(--canvas-color-brand);
+  border-color: var(--canvas-color-brand-border);
+}
+
+.gridButtonIdle {
+  color: var(--canvas-color-text-secondary);
+  border-color: transparent;
+}
+
+.gridButtonIdle:hover:not(:disabled) {
+  border-color: var(--canvas-color-border);
+}
+
+.snapInput {
+  width: 3rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  border-radius: var(--canvas-radius-sm);
+  border: 1px solid var(--canvas-color-border);
+  background: var(--canvas-color-surface);
+  color: var(--canvas-color-text-primary);
+}
+
+.snapInput:focus-visible {
+  outline: none;
+  box-shadow: var(--canvas-focus-ring);
+}
+
+.unit {
+  font-size: 10px;
+  color: var(--canvas-color-text-muted);
+}
+
+.helper {
+  font-size: 10px;
+  color: var(--canvas-color-warning);
+}
+
+.zoomValue {
+  width: 2.5rem;
+  text-align: center;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--canvas-color-text-secondary);
+}
+
+.homeButton {
+  color: var(--canvas-color-text-primary);
+  padding: 0 0.5rem;
+}
+
+.layoutActions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.suggestButton {
+  color: var(--canvas-color-brand);
+  padding: 0 0.5rem;
+}
+
+.clearButton {
+  color: var(--canvas-color-text-secondary);
+  padding: 0 0.5rem;
+}
+
+.paintStack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.paintToggleBase {
+  padding: 0 0.5rem;
+}
+
+.paintToggleActive {
+  color: var(--canvas-color-brand);
+  background: var(--canvas-color-brand-soft);
+  border: 1px solid var(--canvas-color-brand-border);
+}
+
+.paintToggleIdle {
+  color: var(--canvas-color-text-secondary);
+  border: 1px solid transparent;
+}
+
+.paintToggleIdle:hover:not(:disabled) {
+  border-color: var(--canvas-color-border);
+}
+
+.paintSelect {
+  width: 6rem;
+  border-radius: var(--canvas-radius-sm);
+  border: 1px solid var(--canvas-color-border);
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  color: var(--canvas-color-text-primary);
+}
+
+.paintSelect:focus-visible {
+  outline: none;
+  box-shadow: var(--canvas-focus-ring);
+}
+
+.customColorInput {
+  height: 1.75rem;
+  width: 2.5rem;
+  border-radius: var(--canvas-radius-sm);
+  border: 1px solid var(--canvas-color-border);
+  background: var(--canvas-color-surface);
+}
+
+.iconMd {
+  height: 1rem;
+  width: 1rem;
+}
+
+.iconSm {
+  height: 0.75rem;
+  width: 0.75rem;
+}

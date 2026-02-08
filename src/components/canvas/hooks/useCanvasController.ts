@@ -74,7 +74,7 @@ export function useCanvasController({
     [bins]
   );
 
-  const selectedPlacementIds = editor?.placementIds ?? [];
+  const selectedPlacementIds = useMemo(() => editor?.placementIds ?? [], [editor]);
   const selectedCount = selectedPlacementIds.length;
   const selectedPlacement = selectedPlacementIds.length > 0
     ? placements.find((placement) => placement.id === selectedPlacementIds[0]) ?? null

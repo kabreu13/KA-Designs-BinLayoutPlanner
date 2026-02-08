@@ -1,9 +1,92 @@
 import { useState } from 'react';
+import { cva } from 'class-variance-authority';
 import { useDraggable } from '@dnd-kit/core';
 import { Card } from './ui/Card';
 import { ChevronDown, ChevronRight, GripVertical } from 'lucide-react';
 import { useLayout } from '../context/LayoutContext';
 import { BinSizePreview } from './BinSizePreview';
+import styles from './BinCatalog.module.css';
+
+const rootClassName = cva(styles.catalogRoot, {
+  variants: {
+    mobile: {
+      true: styles.catalogRootMobile,
+      false: styles.catalogRootDesktop
+    }
+  }
+});
+
+const headerClassName = cva(styles.header, {
+  variants: {
+    mobile: {
+      true: styles.headerMobile,
+      false: styles.headerDesktop
+    }
+  }
+});
+
+const listClassName = cva(styles.list, {
+  variants: {
+    mobile: {
+      true: styles.listMobile,
+      false: styles.listDesktop
+    }
+  }
+});
+
+const bucketHeaderClassName = cva(styles.bucketHeader, {
+  variants: {
+    mobile: {
+      true: styles.bucketHeaderMobile,
+      false: styles.bucketHeaderDesktop
+    }
+  }
+});
+
+const bucketToggleClassName = cva(styles.bucketToggle, {
+  variants: {
+    mobile: {
+      true: styles.bucketToggleMobile,
+      false: styles.bucketToggleDesktop
+    }
+  }
+});
+
+const bucketGridClassName = cva(styles.bucketGrid, {
+  variants: {
+    mobile: {
+      true: styles.bucketGridMobile,
+      false: styles.bucketGridDesktop
+    }
+  }
+});
+
+const cardClassName = cva(styles.binCard, {
+  variants: {
+    mobile: {
+      true: styles.binCardMobile,
+      false: styles.binCardDesktop
+    }
+  }
+});
+
+const cardContentClassName = cva(styles.binCardContent, {
+  variants: {
+    mobile: {
+      true: styles.binCardContentMobile,
+      false: styles.binCardContentDesktop
+    }
+  }
+});
+
+const dragHintClassName = cva(styles.dragHint, {
+  variants: {
+    mobile: {
+      true: styles.dragHintMobile,
+      false: styles.dragHintDesktop
+    }
+  }
+});
 
 export function BinCatalog({ mobile = false }: { mobile?: boolean }) {
   const { bins, addPlacement } = useLayout();
@@ -36,14 +119,14 @@ export function BinCatalog({ mobile = false }: { mobile?: boolean }) {
 
   return (
     <div
-      className={`flex flex-col h-full bg-white ${mobile ? 'w-full border-0' : 'w-[320px] border-r border-slate-900/[0.06]'}`}
+      className={rootClassName({ mobile })}
     >
       {/* Header */}
-      <div className={`border-b border-slate-900/[0.06] ${mobile ? 'p-3' : 'p-4'}`}>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Bin Catalog</h2>
-        <p className="text-xs text-slate-500">Click or drag to place</p>
+      <div className={headerClassName({ mobile })}>
+        <h2 className={styles.title}>Bin Catalog</h2>
+        <p className={styles.subtitle}>Click or drag to place</p>
         {bucketOrder.length > 0 && (
-          <div className="mt-2 flex items-center justify-between">
+          <div className={styles.toggleRow}>
             <button
               type="button"
               data-testid="catalog-toggle-all"
@@ -51,7 +134,7 @@ export function BinCatalog({ mobile = false }: { mobile?: boolean }) {
                 if (allExpanded) collapseAll();
                 else expandAll();
               }}
-              className="text-xs font-semibold uppercase tracking-wide text-[#14476B] hover:text-[#1a5a8a]"
+              className={styles.toggleAllButton}
             >
               {allExpanded ? 'Collapse All' : 'Expand All'}
             </button>
@@ -62,16 +145,16 @@ export function BinCatalog({ mobile = false }: { mobile?: boolean }) {
 
       {/* Catalog List */}
       <div
-        className={`relative flex-1 overflow-y-auto overflow-x-hidden ${mobile ? 'p-3 space-y-6 hide-scrollbar' : 'p-4 space-y-8'}`}
+        className={listClassName({ mobile })}
       >
         {allCollapsed && (
-          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/60 p-4 text-xs text-slate-500 flex flex-col gap-2">
-            <span className="font-semibold uppercase tracking-wide text-slate-400">No Bins Showing</span>
+          <div className={styles.emptyState}>
+            <span className={styles.emptyStateTitle}>No Bins Showing</span>
             <span>Expand a length to see available bin sizes.</span>
             <button
               type="button"
               onClick={expandAll}
-              className="self-start text-xs font-semibold uppercase tracking-wide text-[#14476B] hover:text-[#1a5a8a]"
+              className={styles.emptyStateAction}
             >
               Expand All Lengths
             </button>
@@ -80,19 +163,21 @@ export function BinCatalog({ mobile = false }: { mobile?: boolean }) {
         {bucketOrder.map(
           (bucket) =>
             grouped[bucket].length > 0 && (
-              <div key={bucket}>
-                <div className={`flex items-center justify-between pr-1 mb-1 ${mobile ? 'sticky top-0 bg-white/95 backdrop-blur py-1 z-10' : ''}`}>
+              <div key={bucket} className={styles.bucketGroup}>
+                <div className={bucketHeaderClassName({ mobile })}>
                   <button
                     type="button"
                     data-testid={`catalog-group-toggle-${bucket}`}
                     aria-expanded={!isBucketCollapsed(bucket)}
                     aria-controls={`catalog-group-body-${bucket}`}
                     onClick={() => toggleBucket(bucket)}
-                    className={`w-full flex items-center gap-1 text-xs font-semibold text-slate-400 uppercase tracking-wider pl-1 text-left hover:text-slate-600 transition-colors ${
-                      mobile ? 'min-h-11' : ''
-                    }`}
+                    className={bucketToggleClassName({ mobile })}
                   >
-                    {isBucketCollapsed(bucket) ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                    {isBucketCollapsed(bucket) ? (
+                      <ChevronRight className={styles.bucketIcon} />
+                    ) : (
+                      <ChevronDown className={styles.bucketIcon} />
+                    )}
                     <span>
                       Length {bucket}" ({grouped[bucket].length})
                     </span>
@@ -102,7 +187,7 @@ export function BinCatalog({ mobile = false }: { mobile?: boolean }) {
                   <div
                     id={`catalog-group-body-${bucket}`}
                     data-testid={`catalog-group-body-${bucket}`}
-                    className={`grid gap-3 ${mobile ? 'grid-cols-2' : 'grid-cols-1 md:grid-cols-2'}`}
+                    className={bucketGridClassName({ mobile })}
                   >
                     {grouped[bucket].map((bin) => (
                       <DraggableBinCard
@@ -127,7 +212,7 @@ export function BinCatalog({ mobile = false }: { mobile?: boolean }) {
             )
         )}
         {mobile && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-white via-white/70 to-transparent" />
+          <div className={styles.mobileBottomFade} />
         )}
       </div>
     </div>
@@ -152,12 +237,8 @@ function DraggableBinCard({
     <Card
       data-testid="bin-card"
       aria-label={`Add ${bin.name}`}
-      role="button"
-      tabIndex={0}
       title="Drag or click to place"
-      className={`group relative cursor-grab active:cursor-grabbing border-slate-200 hover:border-[#14476B]/30 w-full focus-visible:ring-2 focus-visible:ring-[#14476B]/30 ${
-        mobile ? 'min-h-24' : ''
-      }`}
+      className={cardClassName({ mobile })}
       noPadding
       hoverable
       ref={setNodeRef}
@@ -171,16 +252,12 @@ function DraggableBinCard({
       {...listeners}
       {...attributes}
     >
-      <div className={`${mobile ? 'p-3' : 'p-4'} flex items-center justify-center`}>
+      <div className={cardContentClassName({ mobile })}>
         <BinSizePreview width={bin.width} length={bin.length} size="catalog" />
       </div>
-      <div
-        className={`pointer-events-none absolute right-2 top-2 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400 ${
-          mobile ? 'opacity-70' : 'opacity-0 group-hover:opacity-70 group-focus-visible:opacity-70'
-        }`}
-      >
-        <GripVertical className="h-3 w-3" />
-        <span className="hidden sm:inline">Drag</span>
+      <div className={dragHintClassName({ mobile })}>
+        <GripVertical className={styles.dragIcon} />
+        <span className={styles.dragLabel}>Drag</span>
       </div>
     </Card>
   );

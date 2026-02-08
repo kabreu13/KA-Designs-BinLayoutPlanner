@@ -1,0 +1,275 @@
+.collapsedToggle {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 50;
+  border-radius: var(--canvas-radius-pill);
+  border: 1px solid var(--canvas-color-border);
+  background: var(--canvas-color-surface-frost-strong);
+  backdrop-filter: blur(8px);
+  box-shadow: var(--canvas-shadow-sm);
+  color: var(--canvas-color-text-primary);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0.75rem;
+  min-height: 2.75rem;
+}
+
+.collapsedToggleLabel {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.iconMd {
+  width: 1rem;
+  height: 1rem;
+}
+
+.iconSm {
+  width: 0.75rem;
+  height: 0.75rem;
+}
+
+.panel {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.5rem;
+  left: 0.5rem;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--canvas-radius-lg);
+  border: 1px solid var(--canvas-color-border);
+  background: var(--canvas-color-surface-frost);
+  backdrop-filter: blur(8px);
+  box-shadow: var(--canvas-shadow-md);
+  pointer-events: none;
+}
+
+.panelPaintMode {
+  padding-bottom: 1rem;
+}
+
+.section {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+}
+
+.layoutSection {
+  gap: 0.75rem;
+}
+
+.pointerEnabled {
+  pointer-events: auto;
+}
+
+.pointerDisabled {
+  pointer-events: none;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--canvas-color-text-muted);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.layoutRow {
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.iconButton {
+  border-radius: var(--canvas-radius-pill);
+  color: var(--canvas-color-text-secondary);
+  border: 1px solid transparent;
+  width: 2.75rem;
+  height: 2.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.iconButton:hover:not(:disabled) {
+  background: var(--canvas-color-surface-hover);
+}
+
+.iconButton:disabled {
+  opacity: 0.4;
+}
+
+.gridButtonPressed {
+  background: var(--canvas-color-brand-soft);
+  color: var(--canvas-color-brand);
+  border-color: var(--canvas-color-brand-border);
+}
+
+.gridButtonIdle {
+  color: var(--canvas-color-text-secondary);
+  border-color: transparent;
+}
+
+.gridButtonIdle:hover:not(:disabled) {
+  border-color: var(--canvas-color-border);
+}
+
+.snapInput {
+  width: 3.5rem;
+  min-height: 2.5rem;
+  border-radius: var(--canvas-radius-sm);
+  border: 1px solid var(--canvas-color-border);
+  background: var(--canvas-color-surface);
+  color: var(--canvas-color-text-primary);
+  font-size: 0.75rem;
+  padding: 0.5rem;
+}
+
+.snapInput:focus-visible {
+  outline: none;
+  box-shadow: var(--canvas-focus-ring);
+}
+
+.unit {
+  font-size: 10px;
+  color: var(--canvas-color-text-muted);
+}
+
+.helper {
+  font-size: 10px;
+  color: var(--canvas-color-warning);
+}
+
+.zoomValue {
+  width: 3rem;
+  text-align: center;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--canvas-color-text-secondary);
+}
+
+.homeButton {
+  min-height: 2.5rem;
+  padding: 0 0.75rem;
+  color: var(--canvas-color-text-primary);
+}
+
+.suggestButton {
+  min-height: 2.5rem;
+  padding: 0 0.75rem;
+  color: var(--canvas-color-brand);
+}
+
+.clearButton {
+  min-height: 2.5rem;
+  padding: 0 0.75rem;
+  color: var(--canvas-color-text-secondary);
+}
+
+.paintStack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.paintToggleBase {
+  min-height: 2.5rem;
+  padding: 0 0.75rem;
+}
+
+.paintToggleActive {
+  color: var(--canvas-color-brand);
+  background: var(--canvas-color-brand-soft);
+  border: 1px solid var(--canvas-color-brand-border);
+}
+
+.paintToggleIdle {
+  color: var(--canvas-color-text-secondary);
+  border: 1px solid transparent;
+}
+
+.paintToggleIdle:hover:not(:disabled) {
+  border-color: var(--canvas-color-border);
+}
+
+.paintSelect {
+  width: 7rem;
+  min-height: 2.5rem;
+  border-radius: var(--canvas-radius-sm);
+  border: 1px solid var(--canvas-color-border);
+  padding: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--canvas-color-text-primary);
+}
+
+.paintSelect:focus-visible {
+  outline: none;
+  box-shadow: var(--canvas-focus-ring);
+}
+
+.customColorInput {
+  width: 2.5rem;
+  height: 1.75rem;
+  border-radius: var(--canvas-radius-sm);
+  border: 1px solid var(--canvas-color-border);
+  background: var(--canvas-color-surface);
+}
+
+.layoutHint {
+  font-size: 0.75rem;
+  color: var(--canvas-color-text-muted);
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.footerButton {
+  border-radius: var(--canvas-radius-pill);
+  color: var(--canvas-color-text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  min-height: 2.75rem;
+  padding: 0 0.75rem;
+  background: transparent;
+  border: 1px solid transparent;
+}
+
+.footerButton:hover {
+  background: var(--canvas-color-surface-hover);
+}
+
+.footerLabel {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}

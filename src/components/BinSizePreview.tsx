@@ -1,3 +1,6 @@
+import clsx from 'clsx';
+import styles from './BinSizePreview.module.css';
+
 interface BinSizePreviewProps {
   width: number;
   length: number;
@@ -42,12 +45,12 @@ export function BinSizePreview({
     <div
       data-testid={dataTestId}
       data-size={`${width}x${length}`}
-      className={`relative flex items-center justify-center ${className ?? ''}`.trim()}
+      className={clsx(styles.root, className)}
       style={{ width: `${frameSize}px`, height: `${frameSize}px` }}
     >
       <div
         data-testid={dataTestId ? `${dataTestId}-body` : undefined}
-        className="relative border border-slate-200"
+        className={styles.body}
         style={{
           width: `${previewWidth}px`,
           height: `${previewHeight}px`,
@@ -57,7 +60,7 @@ export function BinSizePreview({
         }}
       />
       <span
-        className="absolute text-xs text-slate-700 font-mono leading-none"
+        className={styles.measurementLabel}
         style={{
           left: `${boxLeft + previewWidth / 2}px`,
           top: `${boxTop + previewHeight + config.labelOffset}px`,
@@ -67,7 +70,7 @@ export function BinSizePreview({
         {width}"
       </span>
       <span
-        className="absolute text-xs text-slate-700 font-mono leading-none"
+        className={styles.measurementLabel}
         style={{
           left: `${boxLeft - config.labelOffset}px`,
           top: `${boxTop + previewHeight / 2}px`,

@@ -1,41 +1,45 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-@layer base {
-  :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 47.4% 11.2%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 215 20.2% 65.1%;
-    --primary: 210 60% 32%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --destructive: 0 100% 50%;
-    --destructive-foreground: 210 40% 98%;
-    --radius: 0.5rem;
-  }
-
-  * {
-    @apply border-border;
-  }
-  body {
-    @apply bg-background text-foreground;
-    font-feature-settings: "rlig" 1, "calt" 1;
-  }
+:root {
+  /* Shared styling tokens for CSS modules under src/components */
+  --canvas-color-surface: #ffffff;
+  --canvas-color-surface-frost: rgb(255 255 255 / 90%);
+  --canvas-color-surface-frost-strong: rgb(255 255 255 / 95%);
+  --canvas-color-border: #e2e8f0;
+  --canvas-color-text-primary: #334155;
+  --canvas-color-text-secondary: #475569;
+  --canvas-color-text-subtle: #64748b;
+  --canvas-color-text-muted: #94a3b8;
+  --canvas-color-brand: #14476b;
+  --canvas-color-brand-soft: rgb(20 71 107 / 10%);
+  --canvas-color-brand-border: rgb(20 71 107 / 30%);
+  --canvas-color-warning: #d97706;
+  --canvas-color-danger: #dc2626;
+  --canvas-color-danger-soft: #fef2f2;
+  --canvas-color-surface-hover: #f1f5f9;
+  --canvas-focus-ring: 0 0 0 2px rgb(20 71 107 / 20%);
+  --canvas-shadow-sm: 0 4px 10px rgb(15 23 42 / 15%);
+  --canvas-shadow-md: 0 8px 16px rgb(15 23 42 / 12%);
+  --canvas-shadow-lg: 0 16px 30px rgb(15 23 42 / 20%);
+  --canvas-radius-sm: 0.375rem;
+  --canvas-radius-md: 0.75rem;
+  --canvas-radius-lg: 1rem;
+  --canvas-radius-pill: 9999px;
+  --canvas-control-height: 2.75rem;
 }
 
-@layer utilities {
-  .hide-scrollbar {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
+* {
+  box-sizing: border-box;
+  border-color: var(--canvas-color-border);
+}
 
-  .hide-scrollbar::-webkit-scrollbar {
-    display: none;
-  }
+html,
+body,
+#root {
+  margin: 0;
+  width: 100%;
+}
+
+body {
+  background: #f6f7f8;
+  color: #0b0b0c;
+  font-feature-settings: "rlig" 1, "calt" 1;
 }

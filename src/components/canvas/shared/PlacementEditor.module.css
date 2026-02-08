@@ -1,0 +1,157 @@
+.editor {
+  position: fixed;
+  z-index: 50;
+  border-radius: var(--canvas-radius-md);
+  border: 1px solid var(--canvas-color-border);
+  background: var(--canvas-color-surface);
+  box-shadow: var(--canvas-shadow-lg);
+  padding: 0.75rem;
+  font-size: 0.875rem;
+}
+
+.editorDesktop {
+  width: 15rem;
+}
+
+.editorMobile {
+  width: calc(100% - 2rem);
+  max-width: 24rem;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.25rem;
+}
+
+.title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--canvas-color-text-primary);
+}
+
+.closeButton {
+  font-size: 0.75rem;
+  color: var(--canvas-color-text-muted);
+}
+
+.closeButton:hover {
+  color: var(--canvas-color-text-secondary);
+}
+
+.multiEditNotice {
+  font-size: 11px;
+  color: var(--canvas-color-text-subtle);
+  margin-bottom: 0.5rem;
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--canvas-color-text-subtle);
+}
+
+.inputField {
+  width: 100%;
+  border-radius: var(--canvas-radius-sm);
+  border: 1px solid var(--canvas-color-border);
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  color: var(--canvas-color-text-primary);
+}
+
+.inputField:focus-visible {
+  outline: none;
+  box-shadow: var(--canvas-focus-ring);
+}
+
+.customColorRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: var(--canvas-color-text-subtle);
+}
+
+.customColorInput {
+  height: 1.75rem;
+  width: 2.5rem;
+  border-radius: var(--canvas-radius-sm);
+  border: 1px solid var(--canvas-color-border);
+  background: var(--canvas-color-surface);
+}
+
+.sizeGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.sizeRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: var(--canvas-color-text-subtle);
+}
+
+.sizeControls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sizeButton {
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: var(--canvas-radius-pill);
+  border: 1px solid var(--canvas-color-border);
+  color: var(--canvas-color-text-secondary);
+}
+
+.sizeButton:disabled {
+  opacity: 0.4;
+}
+
+.sizeValue {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--canvas-color-text-primary);
+}
+
+.error {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--canvas-color-danger);
+}
+
+.hint {
+  font-size: 0.75rem;
+  color: var(--canvas-color-text-muted);
+}
+
+.deleteButton {
+  width: 100%;
+  justify-content: center;
+  color: var(--canvas-color-danger);
+}
+
+.deleteButton:hover {
+  background: var(--canvas-color-danger-soft);
+}
+
+.iconSm {
+  height: 0.75rem;
+  width: 0.75rem;
+}

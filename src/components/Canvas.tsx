@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import clsx from 'clsx';
+import { cva } from 'class-variance-authority';
 import type {
   HTMLAttributes,
   MouseEvent as ReactMouseEvent,
@@ -17,6 +19,7 @@ import { DesktopQuickActions } from './canvas/desktop/QuickActions';
 import { MobileQuickActions } from './canvas/mobile/QuickActions';
 import { useCanvasController } from './canvas/hooks/useCanvasController';
 import { PlacementEditor } from './canvas/shared/PlacementEditor';
+import styles from './Canvas.module.css';
 import {
   CUSTOM_COLOR_VALUE,
   DEFAULT_BIN_COLOR,
@@ -99,6 +102,33 @@ const MOBILE_TOUR_STEPS = [
     description: 'Use the Summary tab for drawer settings, item groups, export/share actions, and Etsy cart.'
   }
 ] as const;
+
+const toastToneClassName = cva('', {
+  variants: {
+    tone: {
+      info: styles.toastInfo,
+      error: styles.toastError
+    }
+  }
+});
+
+const canvasAlertToneClassName = cva('', {
+  variants: {
+    tone: {
+      info: styles.canvasAlertInfo,
+      error: styles.canvasAlertError
+    }
+  }
+});
+
+const modalSizeClassName = cva(styles.howToModal, {
+  variants: {
+    mobile: {
+      true: styles.howToModalMobile,
+      false: styles.howToModalDesktop
+    }
+  }
+});
 
 type CanvasProps = {
   isMobileLayout?: boolean;
@@ -1182,14 +1212,18 @@ export function Canvas({
   });
 
   return (
-    <div className={`h-full flex-1 min-h-0 min-w-0 bg-[#F6F7F8] relative overflow-visible flex flex-col ${paintMode ? 'cursor-copy' : ''}`}>
+    <div className={clsx(styles.canvasRoot, paintMode && styles.cursorCopy)}>
       {/* Canvas Area */}
       <div
         data-testid="canvas-scroll-container"
         data-canvas-scale={canvasZoom.toFixed(3)}
         data-canvas-x={canvasPosition.x.toFixed(1)}
         data-canvas-y={canvasPosition.y.toFixed(1)}
-        className={`flex-1 min-h-0 min-w-0 overflow-hidden ${isMobileLayout ? 'p-4 pt-5 hide-scrollbar' : 'p-0'}`}
+        className={clsx(
+          styles.canvasScrollContainer,
+          isMobileLayout && styles.canvasScrollContainerMobile,
+          isMobileLayout && styles.hideScrollbar
+        )}
         style={
           isMobileLayout && mobileBottomSafeInsetPx > 0
             ? { paddingBottom: `${mobileBottomSafeInsetPx}px` }
@@ -1198,7 +1232,10 @@ export function Canvas({
       >
         <div
           ref={canvasViewportRef}
-          className={`h-full w-full min-h-0 min-w-0 ${paintMode ? 'cursor-copy' : isPanningCanvas ? 'cursor-grabbing' : 'cursor-grab'}`}
+          className={clsx(
+            styles.canvasViewport,
+            paintMode ? styles.cursorCopy : isPanningCanvas ? styles.cursorGrabbing : styles.cursorGrab
+          )}
           style={isMobileLayout ? { touchAction: 'none' } : undefined}
           onPointerDown={handleCanvasPointerDown}
           onPointerMove={handleCanvasPointerMove}
@@ -1226,21 +1263,21 @@ export function Canvas({
             onTransformed={handleCanvasTransformed}
           >
             <TransformComponent
-              wrapperClass="h-full w-full min-h-0 min-w-0 !overflow-hidden"
+              wrapperClass={styles.transformWrapper}
               wrapperStyle={{ width: '100%', height: '100%' }}
-              contentClass="!w-fit !h-fit"
+              contentClass={styles.transformContent}
               wrapperProps={TRANSFORM_WRAPPER_TEST_PROPS}
               contentProps={TRANSFORM_CONTENT_TEST_PROPS}
             >
               <div
-                className="relative shrink-0"
+                className={styles.canvasStage}
                 style={{
                   width: `${canvasStageSize.widthPx}px`,
                   height: `${canvasStageSize.heightPx}px`
                 }}
               >
                 <div
-                  className="absolute bg-slate-100/70 rounded-lg shadow-xl border border-slate-900/[0.06]"
+                  className={styles.canvasFrame}
                   style={{
                     left: `${canvasStageGutterPx}px`,
                     top: `${canvasStageGutterPx}px`,
@@ -1249,31 +1286,31 @@ export function Canvas({
                   }}
                 >
                   <div
-                    className="absolute z-10 pointer-events-none"
+                    className={styles.dimensionLabel}
                     style={{
                       left: CANVAS_PADDING + dropAreaSize.widthPx / 2,
                       top: LABEL_ZONE,
                       transform: 'translate(-50%, -50%)'
                     }}
                   >
-                    <div className="text-xs font-medium text-slate-400 bg-white px-2 py-1 rounded-full shadow-sm whitespace-nowrap">
+                    <div className={styles.dimensionPill}>
                       {drawerWidth}" Width
                     </div>
                   </div>
                   <div
-                    className="absolute z-10 pointer-events-none"
+                    className={styles.dimensionLabel}
                     style={{
                       left: LABEL_ZONE,
                       top: CANVAS_PADDING + dropAreaSize.heightPx / 2,
                       transform: 'translate(-50%, -50%)'
                     }}
                   >
-                    <div className="text-xs font-medium text-slate-400 bg-white px-2 py-1 rounded-full shadow-sm -rotate-90 whitespace-nowrap">
+                    <div className={clsx(styles.dimensionPill, styles.dimensionPillVertical)}>
                       {drawerLength}" Length
                     </div>
                   </div>
 
-                  <div id="canvas-instructions" className="sr-only">
+                  <div id="canvas-instructions" className={styles.srOnly}>
                     Layout canvas. Drag bins from the catalog here. Keyboard: focus a catalog card
                     and press Enter to place a bin, then focus a placed bin and press Enter to edit.
                   </div>
@@ -1284,7 +1321,7 @@ export function Canvas({
                     aria-label="Layout canvas"
                     aria-describedby="canvas-instructions"
                     tabIndex={0}
-                    className="absolute bg-white shadow-inner focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14476B]/40 focus-visible:ring-offset-2 focus-visible:ring-offset-[#F6F7F8]"
+                    className={styles.dropArea}
                     style={{
                       left: CANVAS_PADDING,
                       top: CANVAS_PADDING,
@@ -1299,20 +1336,19 @@ export function Canvas({
                       <div
                         role={canvasAlert.type === 'error' ? 'alert' : 'status'}
                         aria-live={canvasAlert.type === 'error' ? 'assertive' : 'polite'}
-                        className={`absolute left-2 top-2 z-20 flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold shadow-sm pointer-events-none ${
-                          canvasAlert.type === 'error'
-                            ? 'bg-red-100 text-red-700'
-                            : 'bg-slate-900 text-white'
-                        }`}
+                        className={clsx(
+                          styles.canvasAlert,
+                          canvasAlertToneClassName({ tone: canvasAlert.type })
+                        )}
                       >
-                        <AlertCircle className="h-3 w-3" />
+                        <AlertCircle className={styles.iconSm} />
                         {canvasAlert.message}
                       </div>
                     )}
                     {showGrid && (
                       <div
                         data-testid="grid-overlay"
-                        className="absolute inset-0 pointer-events-none opacity-25"
+                        className={styles.gridOverlay}
                         style={{
                           backgroundImage:
                             'linear-gradient(#14476B 1px, transparent 1px), linear-gradient(90deg, #14476B 1px, transparent 1px)',
@@ -1324,7 +1360,7 @@ export function Canvas({
                     {binGhost && (
                       <div
                         data-testid="new-bin-ghost"
-                        className="absolute pointer-events-none rounded-sm"
+                        className={styles.newBinGhost}
                         style={{
                           left: `${binGhost.x * gridSize}px`,
                           top: `${binGhost.y * gridSize}px`,
@@ -1366,12 +1402,12 @@ export function Canvas({
                     })}
 
                     {placements.length === 0 && (
-                      <div className="absolute bottom-4 right-4 text-xs text-slate-400 italic pointer-events-none">
+                      <div className={styles.emptyHint}>
                         Drag bins here
                       </div>
                     )}
 
-                    <div className="absolute inset-0 pointer-events-none border-2 border-slate-300" />
+                    <div className={styles.dropBorder} />
                   </div>
                 </div>
               </div>
@@ -1382,7 +1418,7 @@ export function Canvas({
       {!tourActive && howToModalOpen && (
         <>
           <div
-            className="fixed inset-0 z-[70] bg-slate-900/45"
+            className={styles.howToBackdrop}
             onClick={() => setHowToModalOpen(false)}
             aria-hidden="true"
           />
@@ -1391,34 +1427,32 @@ export function Canvas({
             role="dialog"
             aria-modal="true"
             aria-labelledby="how-to-modal-title"
-            className={`fixed z-[71] left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100%-2rem)] rounded-2xl border border-slate-200 bg-white shadow-2xl p-4 sm:p-5 ${
-              isMobileLayout ? 'max-w-md' : 'max-w-xl'
-            }`}
+            className={modalSizeClassName({ mobile: isMobileLayout })}
           >
-            <div className="flex items-start justify-between gap-4">
+            <div className={styles.howToHeader}>
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">How To Start</p>
-                <h3 id="how-to-modal-title" className="mt-1 text-base font-semibold text-[#0B0B0C]">
+                <p className={styles.howToEyebrow}>How To Start</p>
+                <h3 id="how-to-modal-title" className={styles.howToTitle}>
                   Build your first layout in under a minute
                 </h3>
               </div>
               <button
                 type="button"
-                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 text-slate-500 hover:bg-slate-100"
+                className={styles.howToCloseButton}
                 onClick={() => setHowToModalOpen(false)}
                 aria-label="Close how to"
               >
-                <X className="h-4 w-4" />
+                <X className={styles.iconMd} />
               </button>
             </div>
-            <ol className="mt-4 space-y-2 text-sm text-slate-600">
+            <ol className={styles.howToList}>
               <li>1. Drag a bin from the catalog to the canvas.</li>
               <li>2. Drop it in the drawer and repeat for more bins.</li>
               <li>3. Click any bin (or placed-item group) to edit size, color, and label.</li>
               <li>4. Use Export PDF or Copy Share Link from the Summary panel.</li>
               <li>5. Use Open Etsy Cart in the Summary panel when your list is ready.</li>
             </ol>
-            <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+            <div className={styles.howToActions}>
               <Button
                 size="sm"
                 variant="secondary"
@@ -1438,7 +1472,7 @@ export function Canvas({
       )}
 
       {suggestStatus && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-full shadow-md text-xs font-semibold bg-white border border-slate-200 text-slate-700">
+        <div className={styles.statusChip}>
           {suggestStatus === 'packing' ? 'Packing bins…' : 'Randomizing layout…'}
         </div>
       )}
@@ -1448,17 +1482,17 @@ export function Canvas({
           type="button"
           data-testid="paint-mode-chip"
           onClick={togglePaintMode}
-          className="absolute right-4 top-14 sm:top-20 z-[55] inline-flex items-center gap-2 rounded-full border border-[#14476B]/30 bg-white/95 px-3 py-1.5 text-xs font-semibold text-[#14476B] shadow-md hover:bg-[#14476B]/10"
+          className={styles.paintModeChip}
           aria-label="Disable paint mode"
           title="Disable paint mode"
         >
           <span
-            className="h-2.5 w-2.5 rounded-full border border-slate-200"
+            className={styles.paintModeSwatch}
             style={{ backgroundColor: getActivePaintColor() }}
             aria-hidden="true"
           />
           Paint On
-          <span className="text-[11px] font-medium text-slate-500">Tap to exit</span>
+          <span className={styles.paintModeExitHint}>Tap to exit</span>
         </button>
       )}
 
@@ -1526,7 +1560,6 @@ export function Canvas({
           homeZoomPercent={homeZoomPercent}
           onHomeCanvas={fitCanvasInView}
           layoutControlsDisabled={layoutControlsDisabled}
-          suggestModeLabel={suggestModeLabel}
           onSuggestLayout={handleSuggestLayout}
           onClearLayout={handleClearLayout}
           onTogglePaintMode={togglePaintMode}
@@ -1567,9 +1600,7 @@ export function Canvas({
           role={toast.type === 'error' ? 'alert' : 'status'}
           aria-live={toast.type === 'error' ? 'assertive' : 'polite'}
           aria-atomic="true"
-          className={`absolute top-4 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-full shadow-md text-sm ${
-            toast.type === 'error' ? 'bg-red-100 text-red-700' : 'bg-slate-900 text-white'
-          }`}
+          className={clsx(styles.toast, toastToneClassName({ tone: toast.type }))}
         >
           {toast.message}
         </div>
@@ -1578,21 +1609,21 @@ export function Canvas({
       {tourActive && activeTourStep?.selector === '[data-tour="tour-bin-editor"]' && (
         <div
           data-tour="tour-bin-editor"
-          className="fixed z-[61] w-60 rounded-xl border border-slate-200 bg-white shadow-xl p-3 text-sm pointer-events-none"
+          className={styles.tourEditorCard}
           style={{ right: 24, top: 96 }}
         >
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-semibold text-slate-700">Edit Bin</span>
-            <span className="text-slate-300 text-xs">Close</span>
+          <div className={styles.tourEditorHeader}>
+            <span className={styles.tourEditorTitle}>Edit Bin</span>
+            <span className={styles.tourEditorClose}>Close</span>
           </div>
-          <div className="space-y-2 text-xs text-slate-500">
-            <div className="rounded-md border border-slate-200 px-2 py-1">Label</div>
-            <div className="rounded-md border border-slate-200 px-2 py-1">Color</div>
-            <div className="flex items-center justify-between rounded-md border border-slate-200 px-2 py-1">
+          <div className={styles.tourEditorFields}>
+            <div className={styles.tourEditorField}>Label</div>
+            <div className={styles.tourEditorField}>Color</div>
+            <div className={styles.tourEditorFieldRow}>
               <span>Width</span>
               <span>4"</span>
             </div>
-            <div className="flex items-center justify-between rounded-md border border-slate-200 px-2 py-1">
+            <div className={styles.tourEditorFieldRow}>
               <span>Length</span>
               <span>6"</span>
             </div>
@@ -1602,10 +1633,10 @@ export function Canvas({
 
       {tourActive && activeTourStep && (
         <>
-          <div className="fixed inset-0 z-[60] bg-slate-900/35 pointer-events-none" />
+          <div className={styles.tourOverlay} />
           {tourTargetRect && (
             <div
-              className="fixed z-[61] rounded-lg border-2 border-emerald-500 pointer-events-none"
+              className={styles.tourTarget}
               style={{
                 left: `${Math.max(0, tourTargetRect.left - 6)}px`,
                 top: `${Math.max(0, tourTargetRect.top - 6)}px`,
@@ -1617,27 +1648,27 @@ export function Canvas({
           )}
           <div
             data-testid="tour-popover"
-            className="fixed z-[62] w-80 rounded-xl border border-slate-200 bg-white shadow-xl p-4"
+            className={styles.tourPopover}
             style={{ left: `${tourPopoverPosition.left}px`, top: `${tourPopoverPosition.top}px` }}
           >
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <p className={styles.tourPopoverEyebrow}>
               Guided Tour
             </p>
-            <h4 className="mt-1 text-sm font-semibold text-[#0B0B0C]">{activeTourStep.title}</h4>
-            <p className="mt-2 text-xs text-slate-600">{activeTourStep.description}</p>
-            <div className="mt-4 flex items-center justify-between">
+            <h4 className={styles.tourPopoverTitle}>{activeTourStep.title}</h4>
+            <p className={styles.tourPopoverDescription}>{activeTourStep.description}</p>
+            <div className={styles.tourPopoverFooter}>
               <button
                 type="button"
-                className="text-xs text-slate-500 hover:text-slate-700 disabled:opacity-40"
+                className={styles.tourNavButton}
                 onClick={previousTourStep}
                 disabled={tourStepIndex === 0}
               >
                 Back
               </button>
-              <div className="flex items-center gap-2">
+              <div className={styles.tourNavGroup}>
                 <button
                   type="button"
-                  className="text-xs text-slate-500 hover:text-slate-700"
+                  className={styles.tourNavButton}
                   onClick={stopTour}
                 >
                   Skip
@@ -1727,9 +1758,12 @@ function DraggablePlacement({
       tabIndex={0}
       aria-label={ariaLabel}
       ref={setNodeRef}
-      className={`absolute bg-white border border-slate-300 shadow-sm hover:shadow-md hover:border-[#14476B] hover:z-10 transition-all group flex items-center justify-center ${
-        paintMode ? 'cursor-copy' : 'cursor-move'
-      } ${isHighlighted ? 'animate-pulse' : ''} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14476B]/40 focus-visible:ring-offset-2 focus-visible:ring-offset-white`}
+      className={clsx(
+        styles.placedBin,
+        styles.placedBinFocus,
+        paintMode ? styles.placedBinPaint : styles.placedBinMove,
+        isHighlighted && 'animate-pulse'
+      )}
       style={{
         left: `${placement.x * gridSize}px`,
         top: `${placement.y * gridSize}px`,
@@ -1761,24 +1795,24 @@ function DraggablePlacement({
       {...dragListeners}
       {...dragAttributes}
     >
-      <div className="flex flex-col items-center gap-0.5">
+      <div className={styles.placedBinContent}>
         {placement.label && showSecondaryLabel && (
-          <span className="text-xs font-semibold leading-none">
+          <span className={styles.placedBinLabel}>
             {placement.label}
           </span>
         )}
         {showPrimaryLabel && (
-          <span className="text-xs font-medium leading-none">
+          <span className={styles.placedBinSize}>
             {size.length}" x {size.width}"
           </span>
         )}
         {showSecondaryLabel && (
-          <span className="text-[10px] font-medium leading-none opacity-90">
+          <span className={styles.placedBinColor}>
             {colorLabel}
           </span>
         )}
       </div>
-      <div className="absolute bottom-1 right-1 w-1.5 h-1.5 rounded-full bg-slate-300 opacity-0 group-hover:opacity-100" />
+      <div className={styles.placedBinCorner} />
     </div>
   );
 }

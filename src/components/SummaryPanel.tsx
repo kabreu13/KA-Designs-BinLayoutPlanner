@@ -1,4 +1,6 @@
 import { useMemo, useState, useEffect, useRef } from 'react';
+import clsx from 'clsx';
+import { cva } from 'class-variance-authority';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { Button } from './ui/Button';
 import { Trash2, AlertCircle, ChevronDown, ChevronUp, CheckCircle, ShoppingCart } from 'lucide-react';
@@ -6,6 +8,106 @@ import { useLayout } from '../context/LayoutContext';
 import { DEFAULT_BIN_COLOR, getColorLabel, normalizeHexColor } from '../utils/colors';
 import { BinSizePreview } from './BinSizePreview';
 import { buildEtsyCartUrl } from '../lib/etsy';
+import styles from './SummaryPanel.module.css';
+
+const panelRootClassName = cva(styles.panelRoot, {
+  variants: {
+    mobile: {
+      true: styles.panelRootMobile,
+      false: styles.panelRootDesktop
+    }
+  }
+});
+
+const sectionHeaderClassName = cva(styles.header, {
+  variants: {
+    mobile: {
+      true: styles.headerMobile,
+      false: styles.headerDesktop
+    }
+  }
+});
+
+const drawerGridClassName = cva(styles.drawerGrid, {
+  variants: {
+    mobile: {
+      true: styles.drawerGridMobile,
+      false: styles.drawerGridDesktop
+    }
+  }
+});
+
+const fieldInputClassName = cva(styles.fieldInput, {
+  variants: {
+    mobile: {
+      true: styles.fieldInputMobile,
+      false: styles.fieldInputDesktop
+    }
+  }
+});
+
+const listClassName = cva(styles.list, {
+  variants: {
+    mobile: {
+      true: styles.listMobile,
+      false: styles.listDesktop
+    }
+  }
+});
+
+const deleteButtonClassName = cva(styles.deleteButton, {
+  variants: {
+    mobile: {
+      true: styles.deleteButtonMobile,
+      false: styles.deleteButtonDesktop
+    }
+  }
+});
+
+const footerClassName = cva(styles.footer, {
+  variants: {
+    mobile: {
+      true: styles.footerMobile,
+      false: styles.footerDesktop
+    }
+  }
+});
+
+const actionsGridClassName = cva(styles.actionsGrid, {
+  variants: {
+    mobile: {
+      true: styles.actionsGridMobile,
+      false: styles.actionsGridDesktop
+    }
+  }
+});
+
+const actionButtonClassName = cva(styles.actionButton, {
+  variants: {
+    mobile: {
+      true: styles.actionButtonMobile,
+      false: styles.actionButtonDesktop
+    }
+  }
+});
+
+const etsyButtonClassName = cva(styles.etsyButton, {
+  variants: {
+    mobile: {
+      true: styles.etsyButtonMobile,
+      false: styles.etsyButtonDesktop
+    }
+  }
+});
+
+const statusClassName = cva(styles.status, {
+  variants: {
+    kind: {
+      info: styles.statusInfo,
+      error: styles.statusError
+    }
+  }
+});
 
 export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
   const {
@@ -331,18 +433,14 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
   };
 
   return (
-    <div
-      className={`bg-white flex flex-col h-full ${
-        mobile ? 'w-full border-0' : 'w-[320px] border-l border-slate-900/[0.06]'
-      }`}
-    >
-      <div className={`${mobile ? 'p-4' : 'p-6'} border-b border-slate-900/[0.06] space-y-4`}>
+    <div className={panelRootClassName({ mobile })}>
+      <div className={sectionHeaderClassName({ mobile })}>
         {mobile && hasEmptyPlacements && (
           <Button
             variant="secondary"
             size="sm"
             onClick={handleOpenCatalog}
-            className="w-full min-h-11"
+            className={styles.catalogCta}
           >
             Add bins from Catalog
           </Button>
@@ -353,26 +451,26 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
             data-testid="drawer-settings-toggle"
             aria-expanded={isDrawerSettingsOpen}
             onClick={() => setIsDrawerSettingsOpen((open) => !open)}
-            className="w-full min-h-11 px-1 flex items-center justify-between text-left"
+            className={styles.drawerToggle}
           >
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Drawer Settings</h2>
+            <h2 className={styles.sectionTitle}>Drawer Settings</h2>
             {isDrawerSettingsOpen ? (
-              <ChevronUp className="h-4 w-4 text-slate-500" />
+              <ChevronUp className={styles.toggleIcon} />
             ) : (
-              <ChevronDown className="h-4 w-4 text-slate-500" />
+              <ChevronDown className={styles.toggleIcon} />
             )}
           </button>
         ) : (
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+          <h2 className={styles.sectionTitle}>
             Drawer Settings
           </h2>
         )}
 
         {(!mobile || isDrawerSettingsOpen) && (
-          <div className="space-y-4">
-            <div className={`grid ${mobile ? 'grid-cols-1 gap-3' : 'grid-cols-2 gap-4'}`}>
+          <div className={styles.settingsSection}>
+            <div className={drawerGridClassName({ mobile })}>
               <div>
-                <label className="text-xs text-slate-400 mb-1 block">Length (in)</label>
+                <label className={styles.fieldLabel}>Length (in)</label>
                 <input
                   ref={drawerLengthInputRef}
                   type="number"
@@ -393,18 +491,16 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
                     commitDrawerLength();
                     e.currentTarget.blur();
                   }}
-                  className={`w-full bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-[#0B0B0C] focus:outline-none focus:ring-2 focus:ring-[#14476B]/20 ${
-                    mobile ? 'p-3 min-h-11' : 'p-2'
-                  }`}
+                  className={fieldInputClassName({ mobile })}
                 />
                 {drawerInputError.length && (
-                  <p id="drawer-length-error" className="text-[11px] text-red-600 mt-1">
+                  <p id="drawer-length-error" className={styles.fieldError}>
                     {drawerInputError.length}
                   </p>
                 )}
               </div>
               <div>
-                <label className="text-xs text-slate-400 mb-1 block">Width (in)</label>
+                <label className={styles.fieldLabel}>Width (in)</label>
                 <input
                   ref={drawerWidthInputRef}
                   type="number"
@@ -425,36 +521,39 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
                     commitDrawerWidth();
                     e.currentTarget.blur();
                   }}
-                  className={`w-full bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-[#0B0B0C] focus:outline-none focus:ring-2 focus:ring-[#14476B]/20 ${
-                    mobile ? 'p-3 min-h-11' : 'p-2'
-                  }`}
+                  className={fieldInputClassName({ mobile })}
                 />
                 {drawerInputError.width && (
-                  <p id="drawer-width-error" className="text-[11px] text-red-600 mt-1">
+                  <p id="drawer-width-error" className={styles.fieldError}>
                     {drawerInputError.width}
                   </p>
                 )}
               </div>
             </div>
 
-            <div className="space-y-2">
-              <div className="flex justify-between text-xs">
-                <span className="text-slate-600">Space Used</span>
-                <span className="font-semibold text-[#14476B]">{spaceUsedPercent.toFixed(0)}%</span>
+            <div className={styles.statsSection}>
+              <div className={styles.statsRow}>
+                <span className={styles.statsLabel}>Space Used</span>
+                <span className={styles.statsValue}>{spaceUsedPercent.toFixed(0)}%</span>
               </div>
-              <div className="h-2 w-full bg-slate-200 rounded-full overflow-hidden">
-                <div className="h-full bg-[#14476B]" style={{ width: `${spaceUsedPercent}%` }} />
+              <div className={styles.progressTrack} data-testid="space-used-bar">
+                <div
+                  className={styles.progressFill}
+                  data-testid="space-used-bar-fill"
+                  style={{ width: `${spaceUsedPercent}%` }}
+                />
               </div>
-              <p className="text-xs text-slate-500 flex items-center gap-1 mt-2">
-                <AlertCircle className="h-3 w-3" />
+              <p className={styles.statsMeta}>
+                <AlertCircle className={styles.iconSm} />
                 {uniquePlacements.length} bins placed · Drawer area {drawerArea.toFixed(0)} in²
               </p>
               <p
-                className={`text-xs flex items-center gap-1 ${
-                  invalidCount === 0 ? 'text-emerald-600' : 'text-amber-600'
-                }`}
+                className={clsx(
+                  styles.statsHealth,
+                  invalidCount === 0 ? styles.statsHealthGood : styles.statsHealthWarn
+                )}
               >
-                <AlertCircle className="h-3 w-3" />
+                <AlertCircle className={styles.iconSm} />
                 {invalidCount === 0
                   ? 'All bins safely placed.'
                   : `${invalidCount} bin${invalidCount === 1 ? '' : 's'} need attention.`}
@@ -462,9 +561,9 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
               {resizeWarning && (
                 <div
                   role="alert"
-                  className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5 flex items-center gap-1"
+                  className={styles.resizeWarning}
                 >
-                  <AlertCircle className="h-3 w-3" />
+                  <AlertCircle className={styles.iconSm} />
                   {resizeWarning}
                 </div>
               )}
@@ -473,20 +572,20 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
         )}
       </div>
 
-      <div className={`flex-1 overflow-y-auto ${mobile ? 'p-4 hide-scrollbar' : 'p-6'}`}>
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-4">
+      <div className={clsx(listClassName({ mobile }), mobile && styles.listHideScrollbar)}>
+        <h3 className={styles.placedTitle}>
           Placed Items
         </h3>
-        <div className="space-y-3">
+        <div className={styles.groups}>
           {hasEmptyPlacements && (
-            <div className="text-sm text-slate-500 space-y-3">
+            <div className={styles.emptyState}>
               <p>No bins placed yet.</p>
               {!mobile && (
                 <Button
                   variant="primary"
                   size="sm"
                   onClick={handleOpenCatalog}
-                  className="w-full"
+                  className={styles.desktopCatalogButton}
                 >
                   Add bins from Catalog
                 </Button>
@@ -497,13 +596,13 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
             return (
               <div
                 key={`${group.label}-${group.width}-${group.length}-${group.color}`}
-                className="flex items-center justify-between group py-2 border-b border-slate-50 last:border-0"
+                className={styles.groupRow}
               >
                 <button
                   type="button"
                   data-testid="placed-item-group"
                   aria-label={`Edit ${group.label} group`}
-                  className="flex items-center gap-3 flex-1 text-left cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14476B]/30 rounded-md"
+                  className={styles.groupButton}
                   onClick={(event: ReactMouseEvent<HTMLButtonElement>) => {
                     const rect = event.currentTarget.getBoundingClientRect();
                     const keyboardActivated = event.detail === 0;
@@ -516,7 +615,7 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
                     );
                   }}
                 >
-                  <div className="h-14 w-14 flex items-center justify-center">
+                  <div className={styles.groupPreviewWrap}>
                     <BinSizePreview
                       dataTestId="placed-item-preview"
                       width={group.width}
@@ -526,10 +625,10 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
                     />
                   </div>
                   <div>
-                    <p className="text-sm font-medium text-[#0B0B0C]">
+                    <p className={styles.groupSku}>
                       {buildPlacedItemSku(group.width, group.length, group.color)}
                     </p>
-                    <p className="text-xs text-slate-500">
+                    <p className={styles.groupMeta}>
                       Color: {getColorLabel(group.color)} · Amount: {group.placements.length}
                     </p>
                   </div>
@@ -539,11 +638,7 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
                   data-testid="placed-item-delete-button"
                   aria-label={`Delete ${group.placements.length} bin${group.placements.length === 1 ? '' : 's'}`}
                   title="Delete group"
-                  className={`text-slate-400 hover:text-red-500 transition-all flex items-center gap-1 rounded-md px-1 ${
-                    mobile
-                      ? 'min-h-11 min-w-11 opacity-100'
-                      : 'min-h-8 opacity-0 translate-x-1 group-hover:opacity-100 group-hover:translate-x-0 group-focus-within:opacity-100 group-focus-within:translate-x-0 focus-visible:opacity-100 focus-visible:translate-x-0'
-                  }`}
+                  className={deleteButtonClassName({ mobile })}
                   onClick={(event) => {
                     event.stopPropagation();
                     removePlacements(group.placements.map((placement) => placement.id));
@@ -553,8 +648,8 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
                     });
                   }}
                 >
-                  <Trash2 className="h-4 w-4" />
-                  <span className="text-[11px] font-semibold text-slate-400 group-hover:text-red-500 transition-colors">
+                  <Trash2 className={styles.deleteIcon} />
+                  <span className={styles.deleteLabel}>
                     Delete All
                   </span>
                 </button>
@@ -564,18 +659,18 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
         </div>
       </div>
 
-      <div className={`${mobile ? 'p-4' : 'p-6'} bg-slate-50 border-t border-slate-900/[0.06] space-y-4`}>
+      <div className={footerClassName({ mobile })}>
         {savedHint && (
-          <div className="flex items-center justify-center gap-1 text-xs font-semibold text-emerald-700">
-            <CheckCircle className="h-3 w-3" />
+          <div className={styles.savedHint}>
+            <CheckCircle className={styles.iconSm} />
             Saved
           </div>
         )}
-        <div className={`grid ${mobile ? 'grid-cols-1' : 'grid-cols-2'} gap-3`}>
+        <div className={actionsGridClassName({ mobile })}>
           <Button
             variant="secondary"
             size="sm"
-            className={`w-full text-xs ${mobile ? 'min-h-11' : ''}`}
+            className={actionButtonClassName({ mobile })}
             onClick={exportPdf}
           >
             {mobile ? 'Share PDF' : 'Export PDF'}
@@ -583,61 +678,15 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
           <Button
             variant="secondary"
             size="sm"
-            className={`w-full text-xs ${mobile ? 'min-h-11' : ''}`}
+            className={actionButtonClassName({ mobile })}
             onClick={copyShareLink}
           >
             Copy Share Link
           </Button>
-          {/* <Button
-            variant="secondary"
-            size="sm"
-            className="w-full text-xs"
-            onClick={() => {
-              const state = exportState();
-              const blob = new Blob([JSON.stringify(state, null, 2)], {
-                type: 'application/json'
-              });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.href = url;
-              a.download = 'bin-layout.json';
-              a.click();
-              URL.revokeObjectURL(url);
-            }}
-          >
-            Export JSON
-          </Button> */}
-          {/* <Button
-            variant="secondary"
-            size="sm"
-            className="w-full text-xs"
-            onClick={async () => {
-              try {
-                const state = exportState();
-                const encoded = encodeURIComponent(btoa(JSON.stringify(state)));
-                const link = `${window.location.origin}${window.location.pathname}?layout=${encoded}`;
-                if (navigator.clipboard?.writeText) {
-                  await navigator.clipboard.writeText(link);
-                } else {
-                  const ta = document.createElement('textarea');
-                  ta.value = link;
-                  document.body.appendChild(ta);
-                  ta.select();
-                  document.execCommand('copy');
-                  document.body.removeChild(ta);
-                }
-                setStatus({ kind: 'info', text: 'Link copied to clipboard' });
-              } catch (err) {
-                setStatus({ kind: 'error', text: 'Failed to copy link' });
-              }
-            }}
-          >
-            Copy Link
-          </Button> */}
           <Button
             variant="secondary"
             size="sm"
-            className={`w-full text-xs ${mobile ? 'min-h-11' : 'col-span-2'} !text-white !border-0 !bg-gradient-to-r !from-[#F97316] !via-[#EA580C] !to-[#C2410C] shadow-md hover:shadow-lg hover:brightness-105`}
+            className={etsyButtonClassName({ mobile })}
             onClick={() => {
               const cart = buildEtsyCartUrl(etsyCartItems);
               if (cart.missingListingId) {
@@ -662,50 +711,17 @@ export function SummaryPanel({ mobile = false }: { mobile?: boolean }) {
               setStatus({ kind: 'info', text: 'Opened Etsy cart link' });
             }}
             disabled={etsyCartItems.length === 0}
-            leftIcon={<ShoppingCart className="h-3.5 w-3.5" />}
+            leftIcon={<ShoppingCart className={styles.etsyIcon} />}
           >
             Open Etsy Cart
           </Button>
         </div>
 
-        {/* <input
-          id="layout-import"
-          type="file"
-          accept="application/json"
-          className="hidden"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (!file) return;
-            file.text().then((text) => {
-              try {
-                const data = JSON.parse(text);
-                const ok = importState(data);
-                setStatus(ok ? { kind: 'info', text: 'Layout imported' } : { kind: 'error', text: 'Invalid layout file' });
-              } catch (err) {
-                setStatus({ kind: 'error', text: 'Import failed: bad JSON' });
-              }
-            });
-            e.target.value = '';
-          }}
-        /> */}
-        {/* <Button
-          variant="outline"
-          size="sm"
-          className="w-full text-xs"
-          onClick={() => document.getElementById('layout-import')?.click()}
-        >
-          Import JSON
-        </Button> */}
-
         {status && (
           <div
             role={status.kind === 'error' ? 'alert' : 'status'}
             aria-live={status.kind === 'error' ? 'assertive' : 'polite'}
-            className={`text-xs text-center px-3 py-2 rounded-md ${
-              status.kind === 'error'
-                ? 'bg-red-100 text-red-700 border border-red-200'
-                : 'bg-emerald-100 text-emerald-700 border border-emerald-200'
-            }`}
+            className={statusClassName({ kind: status.kind })}
           >
             {status.text}
           </div>

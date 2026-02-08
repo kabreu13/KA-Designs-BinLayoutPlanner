@@ -1,11 +1,12 @@
 import { Header } from './components/Header';
 import { Workspace } from './pages/Workspace';
 import { LayoutProvider } from './context/LayoutContext';
+import styles from './App.module.css';
 
 export function App() {
   return (
     <LayoutProvider>
-      <div className="min-h-screen bg-[#F6F7F8] font-sans text-[#0B0B0C]">
+      <div className={styles.appRoot}>
         <Header />
         <main>
           <Workspace />

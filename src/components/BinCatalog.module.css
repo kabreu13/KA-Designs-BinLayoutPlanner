@@ -1,0 +1,290 @@
+.catalogRoot {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--canvas-color-surface);
+}
+
+.catalogRootMobile {
+  width: 100%;
+  border: 0;
+}
+
+.catalogRootDesktop {
+  width: 20rem;
+  border-right: 1px solid rgb(15 23 42 / 6%);
+}
+
+.header {
+  border-bottom: 1px solid rgb(15 23 42 / 6%);
+}
+
+.headerMobile {
+  padding: 0.75rem;
+}
+
+.headerDesktop {
+  padding: 1rem;
+}
+
+.title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+}
+
+.subtitle {
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+.toggleRow {
+  margin-top: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.toggleAllButton {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--canvas-color-brand);
+}
+
+.toggleAllButton:hover {
+  color: #1a5a8a;
+}
+
+.list {
+  position: relative;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.listMobile {
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.listMobile::-webkit-scrollbar {
+  display: none;
+}
+
+.listDesktop {
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.emptyState {
+  border-radius: var(--canvas-radius-md);
+  border: 1px dashed var(--canvas-color-border);
+  background: rgb(248 250 252 / 60%);
+  padding: 1rem;
+  font-size: 0.75rem;
+  color: #64748b;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.emptyStateTitle {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--canvas-color-text-muted);
+}
+
+.emptyStateAction {
+  align-self: flex-start;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--canvas-color-brand);
+}
+
+.emptyStateAction:hover {
+  color: #1a5a8a;
+}
+
+.bucketGroup {
+  display: block;
+}
+
+.bucketHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+
+.bucketHeaderMobile {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--canvas-color-surface-frost-strong);
+  backdrop-filter: blur(8px);
+  padding: 0.25rem 0;
+}
+
+.bucketHeaderDesktop {
+  position: static;
+  background: transparent;
+}
+
+.bucketToggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--canvas-color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding-left: 0.25rem;
+  text-align: left;
+  transition: color 0.15s ease;
+}
+
+.bucketToggle:hover {
+  color: #475569;
+}
+
+.bucketToggleMobile {
+  min-height: 2.75rem;
+}
+
+.bucketToggleDesktop {
+  min-height: 0;
+}
+
+.bucketIcon {
+  width: 0.75rem;
+  height: 0.75rem;
+}
+
+.bucketGrid {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.bucketGridMobile {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.bucketGridDesktop {
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+}
+
+@media (min-width: 768px) {
+  .bucketGridDesktop {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.mobileBottomFade {
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+  left: 0;
+  bottom: 0;
+  height: 2.5rem;
+  background: linear-gradient(to top, #fff, rgb(255 255 255 / 70%), transparent);
+}
+
+.binCard {
+  position: relative;
+  width: 100%;
+  cursor: grab;
+  border-color: var(--canvas-color-border);
+}
+
+.binCard:active {
+  cursor: grabbing;
+}
+
+.binCard:hover {
+  border-color: var(--canvas-color-brand-border);
+}
+
+.binCard:focus-visible {
+  box-shadow: var(--canvas-focus-ring);
+}
+
+.binCardMobile {
+  min-height: 6rem;
+}
+
+.binCardDesktop {
+  min-height: 0;
+}
+
+.binCardContent {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.binCardContentMobile {
+  padding: 0.75rem;
+}
+
+.binCardContentDesktop {
+  padding: 1rem;
+}
+
+.dragHint {
+  pointer-events: none;
+  position: absolute;
+  right: 0.5rem;
+  top: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--canvas-color-text-muted);
+}
+
+.dragHintMobile {
+  opacity: 0.7;
+}
+
+.dragHintDesktop {
+  opacity: 0;
+}
+
+.binCard:hover .dragHintDesktop,
+.binCard:focus-visible .dragHintDesktop {
+  opacity: 0.7;
+}
+
+.dragIcon {
+  width: 0.75rem;
+  height: 0.75rem;
+}
+
+.dragLabel {
+  display: none;
+}
+
+@media (min-width: 640px) {
+  .dragLabel {
+    display: inline;
+  }
+}

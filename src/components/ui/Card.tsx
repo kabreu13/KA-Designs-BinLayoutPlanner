@@ -1,19 +1,22 @@
 import React from 'react';
+import clsx from 'clsx';
+import styles from './Card.module.css';
+
 interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
   hoverable?: boolean;
   noPadding?: boolean;
 }
 
 export const Card = React.forwardRef<HTMLDivElement, CardProps>(
-  ({ className = '', children, hoverable = false, noPadding = false, ...props }, ref) => (
+  ({ className, children, hoverable = false, noPadding = false, ...props }, ref) => (
     <div
       ref={ref}
-      className={`
-        bg-white rounded-xl border border-slate-900/[0.06] shadow-sm
-        ${hoverable ? 'transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 hover:border-slate-900/[0.1]' : ''}
-        ${noPadding ? '' : 'p-6'}
-        ${className}
-      `}
+      className={clsx(
+        styles.card,
+        hoverable && styles.hoverable,
+        !noPadding && styles.padded,
+        className
+      )}
       {...props}
     >
       {children}

@@ -1,0 +1,19 @@
+.root {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.body {
+  position: relative;
+  border: 1px solid var(--canvas-color-border);
+}
+
+.measurementLabel {
+  position: absolute;
+  font-size: 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  line-height: 1;
+  color: var(--canvas-color-text-secondary);
+}
